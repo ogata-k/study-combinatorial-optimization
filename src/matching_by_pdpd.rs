@@ -316,6 +316,7 @@ impl MatchingSolver {
             let partial_flow = 1;
 
             // 今回流した partial_flow（今回は1なので、1をかける必要はなし。）分の最小追加コスト（= potential[sink]）
+            // sink のポテンシャルは、今回流した 1 単位の最小追加コストに等しい
             total_cost += potential[sink_node_index];
 
             // 残余グラフの更新
