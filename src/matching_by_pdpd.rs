@@ -359,7 +359,7 @@ impl MatchingSolver {
                         // よって、capacity==0なLeft->Right辺はその条件式だけでそのままマッチングとして復元できる。
                         // 今回は（不要ではあるが）念のためとして指定して安全よりの実装にしてある。
                         if edge.capacity == 0
-                            && left_node_count < edge.to_node_index
+                            && left_node_count <= edge.to_node_index
                             && edge.to_node_index < left_node_count + self.graph.right_node_count
                             && edge.cost != DUMMY_COST as ExtendCost
                         {
