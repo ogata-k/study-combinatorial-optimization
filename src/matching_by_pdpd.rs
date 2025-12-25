@@ -16,7 +16,8 @@ type Capacity = i32;
 /// - 非負整数
 /// - 実運用では 0 < cost <= 200 程度を想定
 pub type Cost = u8;
-type TotalCost = i64;
+pub type TotalCost = u32;
+type ExtendTotalCost = i64;
 /// コストを辺に指定するときに負のコストとして指定することがあるので拡張
 type ExtendCost = i64;
 
@@ -99,7 +100,7 @@ impl FlowGraph {
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 struct DijkstraState {
     node_index: NodeId,
-    tmp_current_total_cost: TotalCost,
+    tmp_current_total_cost: ExtendTotalCost,
 }
 
 impl Ord for DijkstraState {
@@ -215,8 +216,8 @@ impl MatchingSolver {
         let source_node_index = self.source_node_index;
         let sink_node_index = self.sink_node_index;
 
-        const INF: TotalCost = TotalCost::MAX / 4;
-        let mut total_cost: TotalCost = 0;
+        const INF: ExtendTotalCost = ExtendTotalCost::MAX / 4;
+        let mut total_cost: ExtendTotalCost = 0;
         // 辺の重みを非負にしてダイクストラ法を使うことができるようにポテンシャルを導入
         // 今回は二部グラフのマッチングなので、ポテンシャルは0の決め打ちで初期化してしまって問題ない。
         // というのも、ダイクストラ法が使えない理由である負の辺が初回は存在しないことが保証されているため。
@@ -377,7 +378,7 @@ impl MatchingSolver {
             }
         }
 
-        Ok((total_cost, matching))
+        Ok((total_cost as TotalCost, matching))
     }
 }
 
