@@ -228,11 +228,22 @@ impl MatchingSolver {
 
         // 今回は流せるだけ流してみて流せなくなったら終了する方式
         // この方式により辺数の最大を保証する
+        // 一時コストを初期化
+        let mut current_total_cost = vec![INF; all_node_count];
+        // 最小重みを求めて辿りたいので、最小ヒープを使う。そのため、逆順にソートして最大ヒープを最小ヒープとして扱う。
+        let mut priority_queue: BinaryHeap<Reverse<DijkstraState>> = BinaryHeap::new();
+
         loop {
+            // ダイクストラ法で最短経路を求めるのに利用するひとつ前の辺のデータを初期化
+            // その回のダイクストラで到達しなかったノードは参照されないので、理論上では初期化は不要。
+            prev_node.fill(None);
+            prev_edge.fill(None);
+
             // 一時コストを初期化
-            let mut current_total_cost = vec![INF; all_node_count];
-            // 最小重みを求めて辿りたいので、最小ヒープを使う。そのため、逆順にソートして最大ヒープを最小ヒープとして扱う。
-            let mut priority_queue: BinaryHeap<Reverse<DijkstraState>> = BinaryHeap::new();
+            current_total_cost.fill(INF);
+
+            // ヒープキューの初期化はダイクストラ法を実施した後は常に空なのでしてもしなくても同じなのでしていない
+            // priority_queue.clear();
 
             // フローの開始点は最初から来ているのでコスト=0で辿ることができる。
             current_total_cost[source_node_index] = 0;
@@ -241,7 +252,6 @@ impl MatchingSolver {
                 node_index: source_node_index,
                 tmp_current_total_cost: 0,
             }));
-
             while let Some(state) = priority_queue.pop() {
                 let DijkstraState {
                     node_index,
