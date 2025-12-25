@@ -647,4 +647,82 @@ mod test {
             )
         );
     }
+
+    #[test]
+    fn all_same_cost() {
+        // コストが等しいときでも最大マッチングになっていること by AI
+        let l = 10;
+        let r = 10;
+        let mut solver = MatchingSolver::new(l, r);
+
+        for i in 0..l {
+            for j in 0..r {
+                solver.add_candidate(i, j, 5).unwrap();
+            }
+        }
+
+        let result = solver.solve().unwrap();
+        assert_eq!(result.1.iter().filter(|x| x.1.is_some()).count(), 10);
+        assert_eq!(result.0, 50);
+    }
+
+    #[test]
+    fn left_much_larger_than_right() {
+        // Left / Right のサイズ差が極端なケースでmin(L, R) 制約が守られているか、片側が余るときの復元安全性が確保されているかの確認 by AI
+        let mut solver = MatchingSolver::new(100, 3);
+        for i in 0..100 {
+            solver.add_candidate(i, i % 3, 1).unwrap();
+        }
+
+        let result = solver.solve().unwrap();
+        assert_eq!(result.1.iter().filter(|x| x.1.is_some()).count(), 3);
+    }
+
+    #[test]
+    fn greedy_trap_case() {
+        // 局所最適を選ぶと失敗するケースに陥るようなGreedyアルゴリズムになっていないこと by AI
+        // L0-R0 を取ると L1 が詰む
+        let mut solver = MatchingSolver::new(2, 2);
+        solver.add_candidate(0, 0, 1).unwrap();
+        solver.add_candidate(0, 1, 100).unwrap();
+        solver.add_candidate(1, 0, 2).unwrap();
+
+        let result = solver.solve().unwrap();
+        assert_eq!(result.0, 102);
+        assert_eq!(result.1, vec![(0, Some(1)), (1, Some(0))]);
+    }
+
+    #[test]
+    fn invalid_candidate_rejected() {
+        // add_candidateの境界条件でエラーとなること by AI
+        let mut solver = MatchingSolver::new(2, 2);
+        assert!(solver.add_candidate(2, 0, 1).is_err());
+        assert!(solver.add_candidate(0, 2, 1).is_err());
+        assert!(solver.add_candidate(0, 0, 0).is_err());
+    }
+
+    #[test]
+    fn rematching_via_residual_graph() {
+        // 残余グラフ + 逆辺が正しく機能していることで、一度マッチしたRightを別のLeftが奪うケースでも問題ないこと by AI
+        let mut solver = MatchingSolver::new(3, 2);
+        solver.add_candidate(0, 0, 10).unwrap();
+        solver.add_candidate(1, 0, 1).unwrap();
+        solver.add_candidate(2, 1, 1).unwrap();
+
+        let result = solver.solve().unwrap();
+        assert_eq!(result.0, 2);
+        assert_eq!(result.1, vec![(0, None), (1, Some(0)), (2, Some(1))]);
+    }
+
+    #[test]
+    fn sparse_large_graph() {
+        // ある程度の大規模でもメモリエラーにならず動くこと by AI
+        let mut solver = MatchingSolver::new(300, 300);
+        for i in 0..300 {
+            solver.add_candidate(i, i, 1).unwrap();
+        }
+
+        let result = solver.solve().unwrap();
+        assert_eq!(result.0, 300);
+    }
 }
