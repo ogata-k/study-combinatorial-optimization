@@ -1,5 +1,5 @@
 //! 非負整数辺重み二部グラフの重み最小辺数最大マッチングを求める。
-//! Potential付きDijkstraによって最小費用流を求めることでマッチングを求めるPrimal-Dual法を採用したアルゴリズムで最大マッチングを求めている。
+//! Potential付きDijkstraによって最小費用流を求めることでマッチングを求めるPrimal-Dual法を採用したアルゴリズムで最大マッチングを求める。
 
 // 実装の参考先
 // https://tjkendev.github.io/procon-library/python/min_cost_flow/primal-dual.html
