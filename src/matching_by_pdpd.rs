@@ -354,7 +354,7 @@ impl MatchingSolver {
                         })?;
 
                         // Leftノードのみを走査している。そのため、left_node_indexはsource/sinkを指すことはない。
-                        // また、ノード番号の割り当ての都合上、Left->Right辺のto_node_indexは(L, L+R)の範囲に収まるため、
+                        // また、ノード番号の割り当ての都合上、Left->Right辺のto_node_indexは[L, L+R)の範囲に収まるため、
                         // source/sinkのインデックスはこの範囲外にあるためto_node_indexとしても考慮不要。
                         // よって、capacity==0なLeft->Right辺はその条件式だけでそのままマッチングとして復元できる。
                         // 今回は（不要ではあるが）念のためとして指定して安全よりの実装にしてある。
@@ -378,5 +378,273 @@ impl MatchingSolver {
         }
 
         Ok((total_cost, matching))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::matching_by_pdpd::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn get_matching_when_nothing_node() {
+        // ノードなしでもマッチング結果の取得ができること
+        let solver = MatchingSolver::new(0, 0);
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (0, vec![]));
+    }
+
+    #[test]
+    fn get_matching_when_only_left_node() {
+        // Leftノードだけでもマッチング結果の取得ができること
+        let solver = MatchingSolver::new(10, 0);
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            (
+                0,
+                vec![
+                    (0, None),
+                    (1, None),
+                    (2, None),
+                    (3, None),
+                    (4, None),
+                    (5, None),
+                    (6, None),
+                    (7, None),
+                    (8, None),
+                    (9, None),
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn get_matching_when_only_right_node() {
+        // Rightノードだけでもマッチング結果の取得ができること
+        let solver = MatchingSolver::new(0, 15);
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (0, vec![]));
+    }
+
+    #[test]
+    fn get_matching_when_only_node_nothing_edge() {
+        // LeftノードとRightノードだけでもマッチング結果の取得ができること
+        let solver = MatchingSolver::new(15, 10);
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            (
+                0,
+                vec![
+                    (0, None),
+                    (1, None),
+                    (2, None),
+                    (3, None),
+                    (4, None),
+                    (5, None),
+                    (6, None),
+                    (7, None),
+                    (8, None),
+                    (9, None),
+                    (10, None),
+                    (11, None),
+                    (12, None),
+                    (13, None),
+                    (14, None),
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn only_left_node_candidate_one() {
+        // Leftノードがいくつかあるが、一つのLeftノードが一つだけリクエストを出しているとき、ちゃんと選ばれていること
+        let mut solver = MatchingSolver::new(3, 5);
+        assert_eq!(solver.add_candidate(1, 3, 7), Ok(()));
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            (7, vec![(0, None), (1, Some(3)), (2, None)])
+        );
+    }
+
+    #[test]
+    fn only_left_node_candidate_many() {
+        // Leftノードがいくつかあるが、一つのLeftノードいくつかリクエストを出しているとき、ちゃんと最小のコストのリクエストが選ばれていること
+        let mut solver = MatchingSolver::new(3, 5);
+        assert_eq!(solver.add_candidate(1, 1, 2), Ok(()));
+        assert_eq!(solver.add_candidate(1, 3, 7), Ok(()));
+        assert_eq!(solver.add_candidate(1, 4, 6), Ok(()));
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            (2, vec![(0, None), (1, Some(1)), (2, None)])
+        );
+    }
+
+    #[test]
+    fn only_right_node_candidate_many() {
+        // Leftノードがいくつかあるが、一つのLeftノードいくつかリクエストを出しているとき、ちゃんと最小のコストのリクエストが選ばれていること
+        let mut solver = MatchingSolver::new(4, 5);
+        assert_eq!(solver.add_candidate(1, 2, 3), Ok(()));
+        assert_eq!(solver.add_candidate(2, 2, 7), Ok(()));
+        assert_eq!(solver.add_candidate(3, 2, 6), Ok(()));
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            (3, vec![(0, None), (1, Some(2)), (2, None), (3, None)])
+        );
+    }
+
+    #[test]
+    fn many_candidate_get_matching_1() {
+        // 複数のリクエストが指定されたときにちゃんと最小のコストのリクエストが選ばれていること
+        let candidates: Vec<(NodeId, NodeId, Cost)> =
+            vec![(0, 0, 10), (0, 2, 2), (1, 0, 5), (1, 2, 8)];
+        let mut solver = MatchingSolver::new(4, 3);
+        for candidate in candidates {
+            assert_eq!(
+                solver.add_candidate(candidate.0, candidate.1, candidate.2),
+                Ok(())
+            );
+        }
+
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            (7, vec![(0, Some(2)), (1, Some(0)), (2, None), (3, None)])
+        );
+    }
+
+    #[test]
+    fn many_candidate_get_matching_2() {
+        // 複数のリクエストが指定されたときにちゃんと最小のコストのリクエストが選ばれていること
+        let candidates: Vec<(NodeId, NodeId, Cost)> =
+            vec![(0, 0, 10), (0, 1, 9), (1, 0, 9), (1, 1, 1)];
+        let mut solver = MatchingSolver::new(2, 2);
+        for candidate in candidates {
+            assert_eq!(
+                solver.add_candidate(candidate.0, candidate.1, candidate.2),
+                Ok(())
+            );
+        }
+
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), (11, vec![(0, Some(0)), (1, Some(1))]));
+    }
+
+    #[test]
+    fn many_candidate_get_matching_3() {
+        // 複数のリクエストが指定されたときにちゃんと最小のコストのリクエストが選ばれていること
+        let candidates: Vec<(NodeId, NodeId, Cost)> = vec![
+            (0, 0, 5),
+            (1, 0, 10),
+            (2, 0, 5),
+            (0, 1, 1),
+            (1, 1, 1),
+            (2, 1, 10),
+        ];
+        let mut solver = MatchingSolver::new(3, 2);
+        for candidate in candidates {
+            assert_eq!(
+                solver.add_candidate(candidate.0, candidate.1, candidate.2),
+                Ok(())
+            );
+        }
+
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            (6, vec![(0, Some(1)), (1, None), (2, Some(0))])
+        );
+    }
+
+    #[test]
+    fn many_candidate_get_matching_4() {
+        // 複数のリクエストが指定されたときにちゃんと最小のコストのリクエストが選ばれていること
+        // 擬似乱数生成 (Xorshift)
+        let mut seed = 123456789u64;
+        let mut rand = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+
+        let left_count = 200;
+        let right_count = 150;
+        let edge_count = 400;
+        let mut edges = Vec::with_capacity(edge_count);
+
+        let mut solver = MatchingSolver::new(left_count, right_count);
+
+        // 重複を避けるためのセット
+        let mut seen = HashSet::new();
+
+        while edges.len() < edge_count {
+            let u = (rand() % left_count as u64) as usize;
+            let v = (rand() % right_count as u64) as usize;
+            if !seen.contains(&(u, v)) {
+                seen.insert((u, v));
+                // 重みは 1 ~ 255
+                let w = (rand() % 255 + 1) as u8;
+                edges.push((u, v, w));
+                assert_eq!(solver.add_candidate(u, v, w), Ok(()));
+            }
+        }
+
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(result.as_ref().unwrap().0, 13175);
+        assert_eq!(
+            result
+                .as_ref()
+                .unwrap()
+                .1
+                .iter()
+                .filter(|t| t.1.is_some())
+                .count(),
+            134
+        );
+    }
+
+    #[test]
+    fn many_candidate_get_matching_5() {
+        // 複数のリクエストが指定されたときにちゃんと最小のコストのリクエストが選ばれていること
+        // 完全二部グラフバージョン
+        let n: usize = 5;
+        let mut solver = MatchingSolver::new(n, n);
+        for i in 0..n {
+            for j in 0..n {
+                assert_eq!(solver.add_candidate(i, j, 1 + (i + j) as u8), Ok(()));
+            }
+        }
+
+        let result = solver.solve();
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            (
+                25,
+                vec![
+                    (0, Some(0)),
+                    (1, Some(1)),
+                    (2, Some(2)),
+                    (3, Some(3)),
+                    (4, Some(4))
+                ]
+            )
+        );
     }
 }
