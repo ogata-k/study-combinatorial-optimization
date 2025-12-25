@@ -26,7 +26,6 @@ pub type NodeId = usize;
 /// マッチングを求めるのに利用するグラフのための有向辺
 #[derive(Debug, Clone)]
 struct Edge {
-    from_node_index: usize,
     to_node_index: usize,
     capacity: Capacity,
     cost: ExtendCost,
@@ -73,7 +72,6 @@ impl FlowGraph {
 
         // 通常の順方向に辺を張る
         self.edges.push(Edge {
-            from_node_index: from_index,
             to_node_index: to_index,
             capacity,
             cost: cost as ExtendCost,
@@ -86,7 +84,6 @@ impl FlowGraph {
 
         // アルゴリズムの残余グラフのために逆方向にも辺を張る
         self.edges.push(Edge {
-            from_node_index: to_index,
             to_node_index: from_index,
             capacity: 0,
             cost: -(cost as ExtendCost),
@@ -206,10 +203,10 @@ impl MatchingSolver {
     /// マッチしたleftとrightの組の一覧を返す
     ///
     /// L: leftのノード数, R: rightのノード数, V = L+R, E = 候補の辺の数, F = マッチング数
-    /// 最悪計算量　O(min(L,R)・E・log(L+R))
-    /// 平均計算量　O(F・V・logV)
-    /// 空間計算量　O(V+E)
-    pub fn solve(mut self) -> Result<(TotalCost, Vec<(NodeId, NodeId)>), String> {
+    /// 最悪計算量: O(F · E · log V), F ≤ min(L, R)
+    /// 平均計算量: O(F · V · log V)
+    /// 空間計算量: O(V + E)
+    pub fn solve(mut self) -> Result<(TotalCost, Vec<(NodeId, Option<NodeId>)>), String> {
         self.setup_source_sink();
 
         let all_node_count = self.graph.all_node_count;
@@ -331,16 +328,42 @@ impl MatchingSolver {
             }
         }
 
-        let mut matching: Vec<(NodeId, NodeId)> = Vec::new();
-        for edge in self.graph.edges.iter() {
-            // Left -> Rightのマッチング対象で会って、選択=フローが流されている=追加で流せるフローの容量は0であって、コストがダミーではないものがマッチング結果に含める対象
-            // 今、0, ..., LeftNode, ..., RightNode, ..., Source, Sinkという順番でノードを管理しているので、LeftとRightはRightのノードのほうがindexが大きい
-            if edge.to_node_index > left_node_count
-                && edge.capacity == 0
-                && edge.cost != DUMMY_COST as ExtendCost
-            {
-                let right_node_index = edge.to_node_index - left_node_count;
-                matching.push((edge.from_node_index, right_node_index));
+        let mut matching: Vec<(NodeId, Option<NodeId>)> = Vec::new();
+        for left_node_index in 0..left_node_count {
+            let mut _edge_index = self.graph.heads[left_node_index];
+            loop {
+                match _edge_index {
+                    None => {
+                        // 該当する辺なしということでマッチしなかった
+                        matching.push((left_node_index, None));
+                        break;
+                    }
+                    Some(edge_index) => {
+                        let edge = self.graph.edges.get(edge_index).ok_or_else(|| {
+                            "invalid edge index for construct matching result".to_string()
+                        })?;
+
+                        // Leftノードのみを走査している。そのため、left_node_indexはsource/sinkを指すことはない。
+                        // また、ノード番号の割り当ての都合上、Left->Right辺のto_node_indexは(L, L+R)の範囲に収まるため、
+                        // source/sinkのインデックスはこの範囲外にあるためto_node_indexとしても考慮不要。
+                        // よって、capacity==0なLeft->Right辺はその条件式だけでそのままマッチングとして復元できる。
+                        // 今回は（不要ではあるが）念のためとして指定して安全よりの実装にしてある。
+                        if edge.capacity == 0
+                            && left_node_count < edge.to_node_index
+                            && edge.to_node_index < left_node_count + self.graph.right_node_count
+                            && edge.cost != DUMMY_COST as ExtendCost
+                        {
+                            // マッチング
+                            matching.push((
+                                left_node_index,
+                                Some(edge.to_node_index - left_node_count),
+                            ));
+                            break;
+                        } else {
+                            _edge_index = edge.next_edge_index;
+                        }
+                    }
+                }
             }
         }
 
