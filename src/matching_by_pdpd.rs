@@ -385,7 +385,7 @@ impl MatchingSolver {
 
 #[cfg(test)]
 mod test {
-    use crate::matching_by_pdpd::*;
+    use super::*;
     use std::collections::HashSet;
 
     #[test]
