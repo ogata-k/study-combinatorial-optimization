@@ -207,7 +207,7 @@ impl MatchingSolver {
     /// 最悪計算量: O(F · E · log V), F ≤ min(L, R)
     /// 平均計算量: O(F · V · log V)
     /// 空間計算量: O(V + E)
-    pub fn solve(mut self) -> Result<(TotalCost, Vec<(NodeId, Option<NodeId>)>), String> {
+    pub fn solve(mut self) -> Result<(TotalCost, Vec<(NodeId, Option<(NodeId, Cost)>)>), String> {
         self.setup_source_sink();
 
         let all_node_count = self.graph.all_node_count;
@@ -340,7 +340,7 @@ impl MatchingSolver {
             }
         }
 
-        let mut matching: Vec<(NodeId, Option<NodeId>)> = Vec::new();
+        let mut matching: Vec<(NodeId, Option<(NodeId, Cost)>)> = Vec::new();
         for left_node_index in 0..left_node_count {
             let mut _edge_index = self.graph.heads[left_node_index];
             loop {
@@ -368,7 +368,8 @@ impl MatchingSolver {
                             // マッチング
                             matching.push((
                                 left_node_index,
-                                Some(edge.to_node_index - left_node_count),
+                                // LeftからRightへ出ている辺だけなので、要求された割当候補のコストにedge.costは制限されている。そのため、Costへキャストして問題ない、
+                                Some((edge.to_node_index - left_node_count, edge.cost as Cost)),
                             ));
                             break;
                         } else {
@@ -472,7 +473,7 @@ mod test {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            (7, vec![(0, None), (1, Some(3)), (2, None)])
+            (7, vec![(0, None), (1, Some((3, 7))), (2, None)])
         );
     }
 
@@ -487,7 +488,7 @@ mod test {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            (2, vec![(0, None), (1, Some(1)), (2, None)])
+            (2, vec![(0, None), (1, Some((1, 2))), (2, None)])
         );
     }
 
@@ -502,7 +503,7 @@ mod test {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            (3, vec![(0, None), (1, Some(2)), (2, None), (3, None)])
+            (3, vec![(0, None), (1, Some((2, 3))), (2, None), (3, None)])
         );
     }
 
@@ -523,7 +524,10 @@ mod test {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            (7, vec![(0, Some(2)), (1, Some(0)), (2, None), (3, None)])
+            (
+                7,
+                vec![(0, Some((2, 2))), (1, Some((0, 5))), (2, None), (3, None)]
+            )
         );
     }
 
@@ -542,7 +546,10 @@ mod test {
 
         let result = solver.solve();
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), (11, vec![(0, Some(0)), (1, Some(1))]));
+        assert_eq!(
+            result.unwrap(),
+            (11, vec![(0, Some((0, 10))), (1, Some((1, 1)))])
+        );
     }
 
     #[test]
@@ -568,7 +575,7 @@ mod test {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            (6, vec![(0, Some(1)), (1, None), (2, Some(0))])
+            (6, vec![(0, Some((1, 1))), (1, None), (2, Some((0, 5)))])
         );
     }
 
@@ -640,11 +647,11 @@ mod test {
             (
                 25,
                 vec![
-                    (0, Some(0)),
-                    (1, Some(1)),
-                    (2, Some(2)),
-                    (3, Some(3)),
-                    (4, Some(4))
+                    (0, Some((0, 1))),
+                    (1, Some((1, 3))),
+                    (2, Some((2, 5))),
+                    (3, Some((3, 7))),
+                    (4, Some((4, 9)))
                 ]
             )
         );
@@ -691,7 +698,7 @@ mod test {
 
         let result = solver.solve().unwrap();
         assert_eq!(result.0, 102);
-        assert_eq!(result.1, vec![(0, Some(1)), (1, Some(0))]);
+        assert_eq!(result.1, vec![(0, Some((1, 100))), (1, Some((0, 2)))]);
     }
 
     #[test]
@@ -713,7 +720,10 @@ mod test {
 
         let result = solver.solve().unwrap();
         assert_eq!(result.0, 2);
-        assert_eq!(result.1, vec![(0, None), (1, Some(0)), (2, Some(1))]);
+        assert_eq!(
+            result.1,
+            vec![(0, None), (1, Some((0, 1))), (2, Some((1, 1)))]
+        );
     }
 
     #[test]
