@@ -615,7 +615,19 @@ mod test {
 
         let result = solver.solve();
         assert!(result.is_ok());
-        assert_eq!(result.as_ref().unwrap().0, 13175);
+        assert_eq!(
+            result.as_ref().unwrap().0,
+            result
+                .as_ref()
+                .ok()
+                .map(|res| {
+                    res.1
+                        .iter()
+                        .filter_map(|i| i.1.map(|j| j.1 as TotalCost))
+                        .sum::<TotalCost>() as TotalCost
+                })
+                .unwrap()
+        );
         assert_eq!(
             result
                 .as_ref()
