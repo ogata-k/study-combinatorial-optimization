@@ -38,7 +38,7 @@ struct Edge {
 
 /// マッチングを求めるためのグラフ
 #[derive(Debug, Clone)]
-struct FlowGraph {
+struct BipartiteResidualGraph {
     all_node_count: usize,
     left_node_count: usize,
     right_node_count: usize,
@@ -49,11 +49,11 @@ struct FlowGraph {
     edges: Vec<Edge>,
 }
 
-impl FlowGraph {
+impl BipartiteResidualGraph {
     /// source, sinkを考慮してグラフを初期化する
     fn new(left_node_count: usize, right_node_count: usize) -> Self {
         let all_node_count = left_node_count + right_node_count + 2;
-        FlowGraph {
+        BipartiteResidualGraph {
             all_node_count,
             left_node_count,
             right_node_count,
@@ -124,7 +124,7 @@ impl PartialOrd for DijkstraState {
 pub struct MatchingSolver {
     source_node_index: usize,
     sink_node_index: usize,
-    graph: FlowGraph,
+    graph: BipartiteResidualGraph,
 }
 
 const FLOW_CAPACITY: Capacity = 1;
@@ -133,7 +133,7 @@ impl MatchingSolver {
     /// MatchingSolverの初期化。
     /// left_count + right_count + 2 <= usize::MAXを仮定している。
     pub fn new(left_count: usize, right_count: usize) -> Self {
-        let graph = FlowGraph::new(left_count, right_count);
+        let graph = BipartiteResidualGraph::new(left_count, right_count);
         let source_node_index = left_count + right_count;
         let sink_node_index = source_node_index + 1;
 
