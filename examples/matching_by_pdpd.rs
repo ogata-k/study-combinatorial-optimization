@@ -1,6 +1,8 @@
 use std::fmt::Display;
 use std::hash::Hash;
-use study_combinatorial_optimization::matching_by_pdpd::{Cost, MatchingSolver, TotalCost};
+use study_combinatorial_optimization::matching_by_pdpd::{
+    Cost, MinCostMaxBipartiteMatching, TotalCost,
+};
 use study_combinatorial_optimization::util::indexer::{BTreeIndexer, Indexer};
 
 fn main() {
@@ -20,7 +22,7 @@ fn example<Left: Display + Eq + Hash + Ord + Clone, Right: Display + Eq + Hash +
     let left_indexer = BTreeIndexer::new(left_all_data);
     let right_indexer = BTreeIndexer::new(right_all_data);
 
-    let mut solver = MatchingSolver::new(left_indexer.len(), right_indexer.len());
+    let mut solver = MinCostMaxBipartiteMatching::new(left_indexer.len(), right_indexer.len());
     for candidate in candidates {
         let left_index = left_indexer.to_index(&candidate.0).unwrap();
         let right_index = right_indexer.to_index(&candidate.1).unwrap();

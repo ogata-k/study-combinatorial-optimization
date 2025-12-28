@@ -123,9 +123,10 @@ impl PartialOrd for DijkstraState {
     }
 }
 
-/// 二部マッチングを解くためのソルバー
+/// 非負整数コスト付き二部グラフに対して
+/// 「辺数最大 → 合計コスト最小」のマッチングを求める
 #[derive(Debug, Clone)]
-pub struct MatchingSolver {
+pub struct MinCostMaxBipartiteMatching {
     source_node_index: usize,
     sink_node_index: usize,
     graph: BipartiteResidualGraph,
@@ -133,7 +134,7 @@ pub struct MatchingSolver {
 
 const FLOW_CAPACITY: Capacity = 1;
 const DUMMY_COST: Cost = 0;
-impl MatchingSolver {
+impl MinCostMaxBipartiteMatching {
     /// MatchingSolverの初期化。
     /// left_count + right_count + 2 <= usize::MAXを仮定している。
     pub fn new(left_count: usize, right_count: usize) -> Self {
@@ -396,7 +397,7 @@ mod test {
     #[test]
     fn get_matching_when_nothing_node() {
         // ノードなしでもマッチング結果の取得ができること
-        let solver = MatchingSolver::new(0, 0);
+        let solver = MinCostMaxBipartiteMatching::new(0, 0);
         let result = solver.solve();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), (0, vec![]));
@@ -405,7 +406,7 @@ mod test {
     #[test]
     fn get_matching_when_only_left_node() {
         // Leftノードだけでもマッチング結果の取得ができること
-        let solver = MatchingSolver::new(10, 0);
+        let solver = MinCostMaxBipartiteMatching::new(10, 0);
         let result = solver.solve();
         assert!(result.is_ok());
         assert_eq!(
@@ -431,7 +432,7 @@ mod test {
     #[test]
     fn get_matching_when_only_right_node() {
         // Rightノードだけでもマッチング結果の取得ができること
-        let solver = MatchingSolver::new(0, 15);
+        let solver = MinCostMaxBipartiteMatching::new(0, 15);
         let result = solver.solve();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), (0, vec![]));
@@ -440,7 +441,7 @@ mod test {
     #[test]
     fn get_matching_when_only_node_nothing_edge() {
         // LeftノードとRightノードだけでもマッチング結果の取得ができること
-        let solver = MatchingSolver::new(15, 10);
+        let solver = MinCostMaxBipartiteMatching::new(15, 10);
         let result = solver.solve();
         assert!(result.is_ok());
         assert_eq!(
@@ -471,7 +472,7 @@ mod test {
     #[test]
     fn only_left_node_candidate_one() {
         // Leftノードがいくつかあるが、一つのLeftノードが一つだけリクエストを出しているとき、ちゃんと選ばれていること
-        let mut solver = MatchingSolver::new(3, 5);
+        let mut solver = MinCostMaxBipartiteMatching::new(3, 5);
         assert_eq!(solver.add_candidate(1, 3, 7), Ok(()));
         let result = solver.solve();
         assert!(result.is_ok());
@@ -484,7 +485,7 @@ mod test {
     #[test]
     fn only_left_node_candidate_many() {
         // Leftノードがいくつかあるが、一つのLeftノードいくつかリクエストを出しているとき、ちゃんと最小のコストのリクエストが選ばれていること
-        let mut solver = MatchingSolver::new(3, 5);
+        let mut solver = MinCostMaxBipartiteMatching::new(3, 5);
         assert_eq!(solver.add_candidate(1, 1, 2), Ok(()));
         assert_eq!(solver.add_candidate(1, 3, 7), Ok(()));
         assert_eq!(solver.add_candidate(1, 4, 6), Ok(()));
@@ -499,7 +500,7 @@ mod test {
     #[test]
     fn only_right_node_candidate_many() {
         // Leftノードがいくつかあるが、一つのLeftノードいくつかリクエストを出しているとき、ちゃんと最小のコストのリクエストが選ばれていること
-        let mut solver = MatchingSolver::new(4, 5);
+        let mut solver = MinCostMaxBipartiteMatching::new(4, 5);
         assert_eq!(solver.add_candidate(1, 2, 3), Ok(()));
         assert_eq!(solver.add_candidate(2, 2, 7), Ok(()));
         assert_eq!(solver.add_candidate(3, 2, 6), Ok(()));
@@ -516,7 +517,7 @@ mod test {
         // 複数のリクエストが指定されたときにちゃんと最小のコストのリクエストが選ばれていること
         let candidates: Vec<(NodeId, NodeId, Cost)> =
             vec![(0, 0, 10), (0, 2, 2), (1, 0, 5), (1, 2, 8)];
-        let mut solver = MatchingSolver::new(4, 3);
+        let mut solver = MinCostMaxBipartiteMatching::new(4, 3);
         for candidate in candidates {
             assert_eq!(
                 solver.add_candidate(candidate.0, candidate.1, candidate.2),
@@ -540,7 +541,7 @@ mod test {
         // 複数のリクエストが指定されたときにちゃんと最小のコストのリクエストが選ばれていること
         let candidates: Vec<(NodeId, NodeId, Cost)> =
             vec![(0, 0, 10), (0, 1, 9), (1, 0, 9), (1, 1, 1)];
-        let mut solver = MatchingSolver::new(2, 2);
+        let mut solver = MinCostMaxBipartiteMatching::new(2, 2);
         for candidate in candidates {
             assert_eq!(
                 solver.add_candidate(candidate.0, candidate.1, candidate.2),
@@ -567,7 +568,7 @@ mod test {
             (1, 1, 1),
             (2, 1, 10),
         ];
-        let mut solver = MatchingSolver::new(3, 2);
+        let mut solver = MinCostMaxBipartiteMatching::new(3, 2);
         for candidate in candidates {
             assert_eq!(
                 solver.add_candidate(candidate.0, candidate.1, candidate.2),
@@ -600,7 +601,7 @@ mod test {
         let edge_count = 400;
         let mut edges = Vec::with_capacity(edge_count);
 
-        let mut solver = MatchingSolver::new(left_count, right_count);
+        let mut solver = MinCostMaxBipartiteMatching::new(left_count, right_count);
 
         // 重複を避けるためのセット
         let mut seen = HashSet::new();
@@ -649,7 +650,7 @@ mod test {
         // 複数のリクエストが指定されたときにちゃんと最小のコストのリクエストが選ばれていること
         // 完全二部グラフバージョン
         let n: usize = 5;
-        let mut solver = MatchingSolver::new(n, n);
+        let mut solver = MinCostMaxBipartiteMatching::new(n, n);
         for i in 0..n {
             for j in 0..n {
                 assert_eq!(solver.add_candidate(i, j, 1 + (i + j) as u8), Ok(()));
@@ -678,7 +679,7 @@ mod test {
         // コストが等しいときでも最大マッチングになっていること by AI
         let l = 10;
         let r = 10;
-        let mut solver = MatchingSolver::new(l, r);
+        let mut solver = MinCostMaxBipartiteMatching::new(l, r);
 
         for i in 0..l {
             for j in 0..r {
@@ -694,7 +695,7 @@ mod test {
     #[test]
     fn left_much_larger_than_right() {
         // Left / Right のサイズ差が極端なケースでmin(L, R) 制約が守られているか、片側が余るときの復元安全性が確保されているかの確認 by AI
-        let mut solver = MatchingSolver::new(100, 3);
+        let mut solver = MinCostMaxBipartiteMatching::new(100, 3);
         for i in 0..100 {
             solver.add_candidate(i, i % 3, 1).unwrap();
         }
@@ -707,7 +708,7 @@ mod test {
     fn greedy_trap_case() {
         // 局所最適を選ぶと失敗するケースに陥るようなGreedyアルゴリズムになっていないこと by AI
         // L0-R0 を取ると L1 が詰む
-        let mut solver = MatchingSolver::new(2, 2);
+        let mut solver = MinCostMaxBipartiteMatching::new(2, 2);
         solver.add_candidate(0, 0, 1).unwrap();
         solver.add_candidate(0, 1, 100).unwrap();
         solver.add_candidate(1, 0, 2).unwrap();
@@ -720,7 +721,7 @@ mod test {
     #[test]
     fn invalid_candidate_rejected() {
         // add_candidateの境界条件でエラーとなること by AI
-        let mut solver = MatchingSolver::new(2, 2);
+        let mut solver = MinCostMaxBipartiteMatching::new(2, 2);
         assert!(solver.add_candidate(2, 0, 1).is_err());
         assert!(solver.add_candidate(0, 2, 1).is_err());
         assert!(solver.add_candidate(0, 0, 0).is_err());
@@ -729,7 +730,7 @@ mod test {
     #[test]
     fn rematching_via_residual_graph() {
         // 残余グラフ + 逆辺が正しく機能していることで、一度マッチしたRightを別のLeftが奪うケースでも問題ないこと by AI
-        let mut solver = MatchingSolver::new(3, 2);
+        let mut solver = MinCostMaxBipartiteMatching::new(3, 2);
         solver.add_candidate(0, 0, 10).unwrap();
         solver.add_candidate(1, 0, 1).unwrap();
         solver.add_candidate(2, 1, 1).unwrap();
@@ -745,7 +746,7 @@ mod test {
     #[test]
     fn sparse_large_graph() {
         // ある程度の大規模でもメモリエラーにならず動くこと by AI
-        let mut solver = MatchingSolver::new(300, 300);
+        let mut solver = MinCostMaxBipartiteMatching::new(300, 300);
         for i in 0..300 {
             solver.add_candidate(i, i, 1).unwrap();
         }
