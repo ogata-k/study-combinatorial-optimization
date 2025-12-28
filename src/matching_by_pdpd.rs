@@ -11,7 +11,7 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-type Capacity = i32;
+type Capacity = u16;
 /// マッチコスト。小さいほど優先。
 /// - 非負整数
 /// - 実運用では 0 < cost <= 200 程度を想定
