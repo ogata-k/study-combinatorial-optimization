@@ -19,6 +19,7 @@ type Capacity = u16;
 /// - 非負整数
 /// - 実運用では 0 < cost <= 200 程度を想定
 pub type Cost = u8;
+/// 最終的に手に入るマッチングである最大マッチングのコスト
 pub type TotalCost = u32;
 type ExtendTotalCost = i64;
 /// コストを辺に指定するときに負のコストとして指定することがあるので拡張
