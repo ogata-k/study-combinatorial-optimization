@@ -205,7 +205,7 @@ impl MatchingSolver {
     ///
     /// L: leftのノード数, R: rightのノード数, V = L+R, E = 候補の辺の数, F = マッチング数
     /// 最悪計算量: O(F · E · log V), F ≤ min(L, R)
-    /// 平均計算量: O(F · V · log V)
+    /// 平均計算量: O(F · E · log V)
     /// 空間計算量: O(V + E)
     pub fn solve(mut self) -> Result<(TotalCost, Vec<(NodeId, Option<(NodeId, Cost)>)>), String> {
         self.setup_source_sink();
