@@ -28,10 +28,12 @@ fn example<Left: Display + Eq + Hash + Ord + Clone, Right: Display + Eq + Hash +
         let right_index = right_indexer.to_index(&candidate.1).unwrap();
         solver
             .add_candidate(left_index, right_index, candidate.2)
-            .unwrap();
+            .expect(
+                "Invalid candidate. Expect left and right node index is in range, 0 < cost <= 256",
+            );
     }
 
-    let result = solver.solve().unwrap();
+    let result = solver.solve();
 
     println!("\n--- Solved with following result ---");
     println!("Matching Cost : {}", result.0);

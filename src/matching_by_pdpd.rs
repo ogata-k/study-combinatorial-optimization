@@ -212,7 +212,7 @@ impl MinCostMaxBipartiteMatching {
     /// 最悪計算量: O(F · E · log V), F ≤ min(L, R)
     /// 平均計算量: O(F · E · log V)
     /// 空間計算量: O(V + E)
-    pub fn solve(mut self) -> Result<(TotalCost, Vec<(NodeId, Option<(NodeId, Cost)>)>), String> {
+    pub fn solve(mut self) -> (TotalCost, Vec<(NodeId, Option<(NodeId, Cost)>)>) {
         self.setup_source_sink();
 
         let all_node_count = self.graph.all_node_count;
@@ -278,7 +278,7 @@ impl MinCostMaxBipartiteMatching {
                         .graph
                         .edges
                         .get(*edge_index)
-                        .ok_or_else(|| "invalid edge_index".to_string())?;
+                        .expect("invalid edge_index");
 
                     // コストを非負化
                     let reduced_cost =
@@ -328,7 +328,7 @@ impl MinCostMaxBipartiteMatching {
             let mut current_residual_node_index = sink_node_index;
             while current_residual_node_index != source_node_index {
                 let prev_edge_index = prev_edge[current_residual_node_index]
-                    .ok_or_else(|| "invalid node_index for residual flow graph".to_string())?;
+                    .expect("invalid node_index for residual flow graph");
                 let rev_prev_edge_index = self.graph.edges[prev_edge_index].reverse_edge_index;
 
                 // 順方向は追加で流した分減らし、逆方向はその分増やす。
@@ -338,10 +338,8 @@ impl MinCostMaxBipartiteMatching {
                 self.graph.edges[rev_prev_edge_index].capacity += partial_flow;
 
                 // 次は現在のノードのひとつ前のノード
-                current_residual_node_index =
-                    prev_node[current_residual_node_index].ok_or_else(|| {
-                        "invalid previous node for residual flow graph's flow path".to_string()
-                    })?;
+                current_residual_node_index = prev_node[current_residual_node_index]
+                    .expect("invalid previous node for residual flow graph's flow path");
             }
         }
 
@@ -356,9 +354,11 @@ impl MinCostMaxBipartiteMatching {
                         break;
                     }
                     Some(edge_index) => {
-                        let edge = self.graph.edges.get(edge_index).ok_or_else(|| {
-                            "invalid edge index for construct matching result".to_string()
-                        })?;
+                        let edge = self
+                            .graph
+                            .edges
+                            .get(edge_index)
+                            .expect("invalid edge index for construct matching result");
 
                         // Leftノードのみを走査している。そのため、left_node_indexはsource/sinkを指すことはない。
                         // また、ノード番号の割り当ての都合上、Left->Right辺のto_node_indexは[L, L+R)の範囲に収まるため、
@@ -385,7 +385,7 @@ impl MinCostMaxBipartiteMatching {
             }
         }
 
-        Ok((total_cost as TotalCost, matching))
+        (total_cost as TotalCost, matching)
     }
 }
 
@@ -399,8 +399,7 @@ mod test {
         // ノードなしでもマッチング結果の取得ができること
         let solver = MinCostMaxBipartiteMatching::new(0, 0);
         let result = solver.solve();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), (0, vec![]));
+        assert_eq!(result, (0, vec![]));
     }
 
     #[test]
@@ -408,9 +407,8 @@ mod test {
         // Leftノードだけでもマッチング結果の取得ができること
         let solver = MinCostMaxBipartiteMatching::new(10, 0);
         let result = solver.solve();
-        assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result,
             (
                 0,
                 vec![
@@ -434,8 +432,7 @@ mod test {
         // Rightノードだけでもマッチング結果の取得ができること
         let solver = MinCostMaxBipartiteMatching::new(0, 15);
         let result = solver.solve();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), (0, vec![]));
+        assert_eq!(result, (0, vec![]));
     }
 
     #[test]
@@ -443,9 +440,8 @@ mod test {
         // LeftノードとRightノードだけでもマッチング結果の取得ができること
         let solver = MinCostMaxBipartiteMatching::new(15, 10);
         let result = solver.solve();
-        assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result,
             (
                 0,
                 vec![
@@ -475,11 +471,7 @@ mod test {
         let mut solver = MinCostMaxBipartiteMatching::new(3, 5);
         assert_eq!(solver.add_candidate(1, 3, 7), Ok(()));
         let result = solver.solve();
-        assert!(result.is_ok());
-        assert_eq!(
-            result.unwrap(),
-            (7, vec![(0, None), (1, Some((3, 7))), (2, None)])
-        );
+        assert_eq!(result, (7, vec![(0, None), (1, Some((3, 7))), (2, None)]));
     }
 
     #[test]
@@ -490,11 +482,7 @@ mod test {
         assert_eq!(solver.add_candidate(1, 3, 7), Ok(()));
         assert_eq!(solver.add_candidate(1, 4, 6), Ok(()));
         let result = solver.solve();
-        assert!(result.is_ok());
-        assert_eq!(
-            result.unwrap(),
-            (2, vec![(0, None), (1, Some((1, 2))), (2, None)])
-        );
+        assert_eq!(result, (2, vec![(0, None), (1, Some((1, 2))), (2, None)]));
     }
 
     #[test]
@@ -505,9 +493,8 @@ mod test {
         assert_eq!(solver.add_candidate(2, 2, 7), Ok(()));
         assert_eq!(solver.add_candidate(3, 2, 6), Ok(()));
         let result = solver.solve();
-        assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result,
             (3, vec![(0, None), (1, Some((2, 3))), (2, None), (3, None)])
         );
     }
@@ -526,9 +513,8 @@ mod test {
         }
 
         let result = solver.solve();
-        assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result,
             (
                 7,
                 vec![(0, Some((2, 2))), (1, Some((0, 5))), (2, None), (3, None)]
@@ -550,11 +536,7 @@ mod test {
         }
 
         let result = solver.solve();
-        assert!(result.is_ok());
-        assert_eq!(
-            result.unwrap(),
-            (11, vec![(0, Some((0, 10))), (1, Some((1, 1)))])
-        );
+        assert_eq!(result, (11, vec![(0, Some((0, 10))), (1, Some((1, 1)))]));
     }
 
     #[test]
@@ -577,9 +559,8 @@ mod test {
         }
 
         let result = solver.solve();
-        assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result,
             (6, vec![(0, Some((1, 1))), (1, None), (2, Some((0, 5)))])
         );
     }
@@ -619,30 +600,15 @@ mod test {
         }
 
         let result = solver.solve();
-        assert!(result.is_ok());
         assert_eq!(
-            result.as_ref().unwrap().0,
+            result.0,
             result
-                .as_ref()
-                .ok()
-                .map(|res| {
-                    res.1
-                        .iter()
-                        .filter_map(|i| i.1.map(|j| j.1 as TotalCost))
-                        .sum::<TotalCost>() as TotalCost
-                })
-                .unwrap()
-        );
-        assert_eq!(
-            result
-                .as_ref()
-                .unwrap()
                 .1
                 .iter()
-                .filter(|t| t.1.is_some())
-                .count(),
-            134
+                .filter_map(|i| i.1.map(|j| j.1 as TotalCost))
+                .sum::<TotalCost>() as TotalCost
         );
+        assert_eq!(result.1.iter().filter(|t| t.1.is_some()).count(), 134);
     }
 
     #[test]
@@ -658,9 +624,8 @@ mod test {
         }
 
         let result = solver.solve();
-        assert!(result.is_ok());
         assert_eq!(
-            result.unwrap(),
+            result,
             (
                 25,
                 vec![
@@ -683,11 +648,11 @@ mod test {
 
         for i in 0..l {
             for j in 0..r {
-                solver.add_candidate(i, j, 5).unwrap();
+                assert_eq!(solver.add_candidate(i, j, 5), Ok(()));
             }
         }
 
-        let result = solver.solve().unwrap();
+        let result = solver.solve();
         assert_eq!(result.1.iter().filter(|x| x.1.is_some()).count(), 10);
         assert_eq!(result.0, 50);
     }
@@ -697,10 +662,10 @@ mod test {
         // Left / Right のサイズ差が極端なケースでmin(L, R) 制約が守られているか、片側が余るときの復元安全性が確保されているかの確認 by AI
         let mut solver = MinCostMaxBipartiteMatching::new(100, 3);
         for i in 0..100 {
-            solver.add_candidate(i, i % 3, 1).unwrap();
+            assert_eq!(solver.add_candidate(i, i % 3, 1), Ok(()));
         }
 
-        let result = solver.solve().unwrap();
+        let result = solver.solve();
         assert_eq!(result.1.iter().filter(|x| x.1.is_some()).count(), 3);
     }
 
@@ -709,11 +674,11 @@ mod test {
         // 局所最適を選ぶと失敗するケースに陥るようなGreedyアルゴリズムになっていないこと by AI
         // L0-R0 を取ると L1 が詰む
         let mut solver = MinCostMaxBipartiteMatching::new(2, 2);
-        solver.add_candidate(0, 0, 1).unwrap();
-        solver.add_candidate(0, 1, 100).unwrap();
-        solver.add_candidate(1, 0, 2).unwrap();
+        assert_eq!(solver.add_candidate(0, 0, 1), Ok(()));
+        assert_eq!(solver.add_candidate(0, 1, 100), Ok(()));
+        assert_eq!(solver.add_candidate(1, 0, 2), Ok(()));
 
-        let result = solver.solve().unwrap();
+        let result = solver.solve();
         assert_eq!(result.0, 102);
         assert_eq!(result.1, vec![(0, Some((1, 100))), (1, Some((0, 2)))]);
     }
@@ -722,8 +687,11 @@ mod test {
     fn invalid_candidate_rejected() {
         // add_candidateの境界条件でエラーとなること by AI
         let mut solver = MinCostMaxBipartiteMatching::new(2, 2);
+        // out of left index
         assert!(solver.add_candidate(2, 0, 1).is_err());
+        // out of right index
         assert!(solver.add_candidate(0, 2, 1).is_err());
+        // out of cost value range (0<cost<=Cost::MAX)
         assert!(solver.add_candidate(0, 0, 0).is_err());
     }
 
@@ -731,11 +699,11 @@ mod test {
     fn rematching_via_residual_graph() {
         // 残余グラフ + 逆辺が正しく機能していることで、一度マッチしたRightを別のLeftが奪うケースでも問題ないこと by AI
         let mut solver = MinCostMaxBipartiteMatching::new(3, 2);
-        solver.add_candidate(0, 0, 10).unwrap();
-        solver.add_candidate(1, 0, 1).unwrap();
-        solver.add_candidate(2, 1, 1).unwrap();
+        assert_eq!(solver.add_candidate(0, 0, 10), Ok(()));
+        assert_eq!(solver.add_candidate(1, 0, 1), Ok(()));
+        assert_eq!(solver.add_candidate(2, 1, 1), Ok(()));
 
-        let result = solver.solve().unwrap();
+        let result = solver.solve();
         assert_eq!(result.0, 2);
         assert_eq!(
             result.1,
@@ -748,10 +716,10 @@ mod test {
         // ある程度の大規模でもメモリエラーにならず動くこと by AI
         let mut solver = MinCostMaxBipartiteMatching::new(300, 300);
         for i in 0..300 {
-            solver.add_candidate(i, i, 1).unwrap();
+            assert_eq!(solver.add_candidate(i, i, 1), Ok(()));
         }
 
-        let result = solver.solve().unwrap();
+        let result = solver.solve();
         assert_eq!(result.0, 300);
     }
 }
