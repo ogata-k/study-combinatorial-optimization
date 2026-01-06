@@ -1,3 +1,5 @@
+//! 左の集合の要素を右の集合の要素へコスト付きで割当をするとき、その割当コストを最小にする最大のマッチングを求める問題を解く
+
 use std::fmt::Display;
 use std::hash::Hash;
 use study_combinatorial_optimization::matching_by_pdpd::{
