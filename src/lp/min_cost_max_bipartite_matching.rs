@@ -7,6 +7,8 @@ use good_lp::{
 };
 use std::collections::BTreeMap;
 
+/// 非負整数コスト付き二部グラフとして表される割当問題に対して
+/// 「辺数最大 → 合計コスト最小」のマッチングを求める
 pub struct BipartiteMatchingLpSolver {
     candidates: BTreeMap<(NodeId, NodeId), Cost>,
 }
@@ -19,7 +21,7 @@ impl BipartiteMatchingLpSolver {
     }
 
     /// マッチしてほしい組を登録
-    /// 同じ(left_index, right_index)を持つ辺を張ることは想定しておらず、後勝ちで登録する。
+    /// 同じ(left_index, right_index)を持つ辺を張ることは想定していない。後勝ちで登録する。
     pub fn add_candidate(
         &mut self,
         left_index: NodeId,
