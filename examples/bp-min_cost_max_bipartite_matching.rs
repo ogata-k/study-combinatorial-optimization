@@ -1,10 +1,10 @@
 //! 左の集合の要素を右の集合の要素へコスト付きで割当をするとき、その割当コストを最小にする最大のマッチングを求める問題を解く
+//! examples/cp-min_cost_max_bipartite_matching.rsの0/1計画問題として解くバージョン
 
 use std::fmt::Display;
 use std::hash::Hash;
-use study_combinatorial_optimization::cp::matching_by_pdpd::{
-    Cost, MinCostMaxBipartiteMatching, TotalCost,
-};
+use study_combinatorial_optimization::cp::matching_by_pdpd::{Cost, TotalCost};
+use study_combinatorial_optimization::lp::min_cost_max_bipartite_matching::BipartiteMatchingLpSolver;
 use study_combinatorial_optimization::util::indexer::{BTreeIndexer, Indexer};
 
 fn main() {
@@ -24,15 +24,15 @@ fn example<Left: Display + Eq + Hash + Ord + Clone, Right: Display + Eq + Hash +
     let left_indexer = BTreeIndexer::new(left_all_data);
     let right_indexer = BTreeIndexer::new(right_all_data);
 
-    let mut solver = MinCostMaxBipartiteMatching::new(left_indexer.len(), right_indexer.len());
+    let mut solver = BipartiteMatchingLpSolver::new();
+
     for candidate in candidates {
         let left_index = left_indexer.to_index(&candidate.0).unwrap();
         let right_index = right_indexer.to_index(&candidate.1).unwrap();
+
         solver
             .add_candidate(left_index, right_index, candidate.2)
-            .expect(
-                "Invalid candidate. Expect left and right node index is in range, 0 < cost <= 256",
-            );
+            .expect("Invalid candidate. Expect 0 < cost <= 256");
     }
 
     let result = solver.solve();
