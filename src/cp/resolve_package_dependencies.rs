@@ -494,7 +494,14 @@ pub fn resolve_deps_by_recursive_backtracking(
 
         // 3. レジストリから候補となるバージョンを取得し、降順（新しい順）に試す
         match registry.packages.get(&package_name) {
-            None => Err(format!("Package entry of {} not found.", package_name)),
+            None => {
+                if package_name == root_package_name {
+                    // ルートパッケージは通常記録されていないので、依存先として検出されたここでは分けてエラーを返す。
+                    return Err(format!("Cycle detected with {}.", root_package_name));
+                }
+
+                Err(format!("Package entry of {} not found.", package_name))
+            }
             Some(entry) => {
                 let mut last_error = None;
                 let mut rejection_reasons = Vec::new();
@@ -1169,5 +1176,60 @@ mod tests {
         let graph = result.unwrap();
         assert_eq!(graph.get("B").unwrap().version, v100);
         assert_eq!(graph.get("C").unwrap().version, v100);
+    }
+
+    #[test]
+    fn resolve_fail_dependency_on_root() {
+        let mut registry = PackageRegistry::new();
+        let v1 = Version::new(1, 0, 0);
+
+        // A -> ROOT ^0.1.0 (Root package)
+        registry.add_package(
+            "A",
+            v1,
+            PackageInfo::new(vec![("ROOT".to_string(), "^0.1.0".parse().unwrap())]),
+        );
+
+        let root_version: Version = "0.1.0".parse().unwrap();
+        let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
+
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
+
+        // 循環参照として検出され、候補が却下されるためエラーになる
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.contains("Cycle detected"));
+    }
+
+    #[test]
+    fn resolve_fail_transitive_dependency_on_root() {
+        let mut registry = PackageRegistry::new();
+        let v1 = Version::new(1, 0, 0);
+
+        // A -> B ^1.0.0
+        registry.add_package(
+            "A",
+            v1,
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+
+        // B -> ROOT ^0.1.0 (Root package)
+        registry.add_package(
+            "B",
+            v1,
+            PackageInfo::new(vec![("ROOT".to_string(), "^0.1.0".parse().unwrap())]),
+        );
+
+        let root_version: Version = "0.1.0".parse().unwrap();
+        let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
+
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
+
+        // 循環参照として検出され、候補が却下されるためエラーになる
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.contains("Cycle detected"));
     }
 }
