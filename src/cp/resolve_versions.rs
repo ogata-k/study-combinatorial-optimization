@@ -530,7 +530,7 @@ pub fn resolve_deps_by_recursive_backtracking(
     recursive(registry, root_package_name, root_deps, &mut assigned)
 }
 
-// PubGrub (Next-Generation Version Solving)という方法でバージョン依存を解決する
+/// PubGrub (Next-Generation Version Solving)という方法でバージョン依存を解決する
 pub fn resolve_deps_by_pub_grub(
     registry: &PackageRegistry,
     root_deps: &Vec<(PackageName, Constraint)>,
