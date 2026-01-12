@@ -428,11 +428,11 @@ pub fn resolve_deps_by_recursive_backtracking(
         let package_name = next_package_name.unwrap();
 
         // 2. 探そうとしているパッケージの制約として、ルートからの制約と現時点で確定している制約を収集する
-        let mut constraints = Vec::new();
+        let mut constraints: Vec<(PackageName, &Constraint)> = Vec::new();
         // ルートからの制約
         for (name, constraint) in root_deps {
             if name == &package_name {
-                constraints.push(constraint);
+                constraints.push((root_package_name.to_string(), constraint));
             }
         }
         // 確定済みパッケージからの制約
@@ -444,7 +444,10 @@ pub fn resolve_deps_by_recursive_backtracking(
                     assigned_package_deps
                 {
                     if assigned_package_dep_name == &package_name {
-                        constraints.push(assigned_package_dep_constraint);
+                        constraints.push((
+                            assigned_package_name.to_string(),
+                            assigned_package_dep_constraint,
+                        ));
                     }
                 }
             }
@@ -457,16 +460,18 @@ pub fn resolve_deps_by_recursive_backtracking(
             }
             Some(entry) => {
                 let mut last_error = None;
+                let mut rejection_reasons = Vec::new();
 
                 // 全バージョンを取得して降順にソート
                 for (candidate_version, candidate_package_info) in
                     entry.get_versions_with_deps(..).rev()
                 {
                     // すべての制約を満たすかチェック
-                    if constraints
+                    let unsatisfied = constraints
                         .iter()
-                        .all(|c| c.is_satisfied(*candidate_version))
-                    {
+                        .find(|(_pn, c)| !c.is_satisfied(*candidate_version));
+
+                    if unsatisfied.is_none() {
                         // 依存先の整合性チェック（既に解決済みのパッケージに対して、この候補が持つ制約が矛盾しないか）
                         let mut consistent = true;
                         for (dep_name, dep_constraint) in candidate_package_info.get_deps() {
@@ -498,6 +503,12 @@ pub fn resolve_deps_by_recursive_backtracking(
                                 }
                             }
                         }
+                    } else {
+                        let (source_pkg, constraint) = unsatisfied.unwrap();
+                        rejection_reasons.push(format!(
+                            "Version {} rejected by constraint {} from {}",
+                            candidate_version, constraint, source_pkg
+                        ));
                     }
                 }
 
@@ -506,18 +517,16 @@ pub fn resolve_deps_by_recursive_backtracking(
                 if let Some(e) = last_error {
                     return Err(e);
                 }
+
+                Err(format!(
+                    "Could not resolve dependencies for {}.\nConstraints: {:?}\nAvailable versions: {:?}\nRejection reasons:\n{}",
+                    package_name,
+                    constraints,
+                    entry.get_versions(..).collect::<Vec<_>>(),
+                    rejection_reasons.join("\n")
+                ))
             }
         }
-
-        Err(format!(
-            "Could not resolve dependencies for {}.\nConstraints: {:?}\nAvailable versions: {:?}",
-            package_name,
-            constraints,
-            registry
-                .packages
-                .get(&package_name)
-                .map(|e| e.get_versions(..).collect::<Vec<_>>())
-        ))
     }
 
     recursive(registry, root_package_name, root_deps, &mut assigned)
