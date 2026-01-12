@@ -357,7 +357,10 @@ impl ResolvedPackageInfo {
 /// パッケージ名をキーとし、解決された情報を値とする。
 pub type ResolvedGraph = HashMap<PackageName, ResolvedPackageInfo>;
 
-/// 再帰的バックトラッキング (Recursive Backtracking)という方法でバージョン依存を解決する
+/// 再帰的バックトラッキング (Recursive Backtracking)という方法でバージョン依存を解決する。
+///
+/// 実装してみた感想としては、エラー文言の制御が難しいと感じた。
+/// 再帰的な処理であることと依存関係の解決状況を調整しながら他の可能性も探索する必要があることで適当な文言を選ぶことが難しくなっているみたい。
 pub fn resolve_deps_by_recursive_backtracking(
     registry: &PackageRegistry,
     root_package_name: &str,
