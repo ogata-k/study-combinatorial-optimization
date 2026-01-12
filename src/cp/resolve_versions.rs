@@ -460,14 +460,14 @@ pub fn resolve_deps_by_recursive_backtracking(
                 let mut last_error = None;
                 let mut rejection_reasons = Vec::new();
 
-                // 全バージョンを取得して降順にソート
+                // 全バージョンを取得して降順にソートして、最新から順に確認する
                 for (candidate_version, candidate_package_info) in
                     entry.get_versions_with_deps(..).rev()
                 {
                     // すべての制約を満たすかチェック
                     let unsatisfied = constraints
                         .iter()
-                        .find(|(_pn, c)| !c.is_satisfied(*candidate_version));
+                        .find(|(_, c)| !c.is_satisfied(*candidate_version));
 
                     if unsatisfied.is_none() {
                         // 依存先の整合性チェック（既に解決済みのパッケージに対して、この候補が持つ制約が矛盾しないか）
@@ -481,8 +481,8 @@ pub fn resolve_deps_by_recursive_backtracking(
                                 ));
                             }
                             // 既に解決済みのパッケージに対して、この候補が持つ制約が矛盾しないか
-                            else if let Some(existing_ver) = assigned.get(dep_name) {
-                                if !dep_constraint.is_satisfied(*existing_ver) {
+                            else if let Some(assigned_dev_version) = assigned.get(dep_name) {
+                                if !dep_constraint.is_satisfied(*assigned_dev_version) {
                                     consistent = false;
                                     break;
                                 }
@@ -490,7 +490,7 @@ pub fn resolve_deps_by_recursive_backtracking(
                         }
 
                         if consistent {
-                            // 仮決定して再帰
+                            // 依存先が既存の解決済みパッケージのバージョンと制約を満たすので、仮決定して深さ優先的に再帰
                             assigned.insert(package_name.clone(), *candidate_version);
                             match recursive(registry, root_package_name, root_deps, assigned) {
                                 Ok(graph) => return Ok(graph),
@@ -502,10 +502,10 @@ pub fn resolve_deps_by_recursive_backtracking(
                             }
                         }
                     } else {
-                        let (source_pkg, constraint) = unsatisfied.unwrap();
+                        let (unsatisfied_package, unsatisfied_constraint) = unsatisfied.unwrap();
                         rejection_reasons.push(format!(
                             "Version {} rejected by constraint {} from {}",
-                            candidate_version, constraint, source_pkg
+                            candidate_version, unsatisfied_constraint, unsatisfied_package
                         ));
                     }
                 }
