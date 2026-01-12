@@ -556,7 +556,15 @@ pub fn resolve_deps_by_recursive_backtracking(
                                 Ok(graph) => return Ok(graph),
                                 Err(e) => {
                                     // 失敗した場合はエラーを記録してバックトラック
-                                    last_error = Some(e);
+                                    rejection_reasons.push(format!(
+                                        "Version {} failed to resolve dependencies: {}",
+                                        candidate_version, e
+                                    ));
+                                    // 新しいバージョンから順に試しているため、最初のエラー（最新バージョンでの失敗）を
+                                    // 優先して残す方が、ユーザーにとって「なぜ最新が入らないのか」を知る上で有益な場合が多い。
+                                    if last_error.is_none() {
+                                        last_error = Some(e);
+                                    }
                                     assigned.remove(&package_name);
                                 }
                             }
