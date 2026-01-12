@@ -455,9 +455,7 @@ pub fn resolve_deps_by_recursive_backtracking(
 
         // 3. レジストリから候補となるバージョンを取得し、降順（新しい順）に試す
         match registry.packages.get(&package_name) {
-            None => {
-                return Err(format!("Package entry of {} not found.", package_name));
-            }
+            None => Err(format!("Package entry of {} not found.", package_name)),
             Some(entry) => {
                 let mut last_error = None;
                 let mut rejection_reasons = Vec::new();
