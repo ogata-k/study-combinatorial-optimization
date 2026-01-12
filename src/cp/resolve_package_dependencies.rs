@@ -1,7 +1,7 @@
 //! パッケージの依存関係を解決するように、指定したバージョンの制約を満たしつつ適当なインストール順に並べたパッケージの一覧を求めるためのモジュール
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, btree_map};
+use std::collections::{BTreeMap, HashMap, HashSet, btree_map};
 use std::fmt;
 use std::fmt::Formatter;
 use std::ops::RangeBounds;
@@ -371,6 +371,44 @@ pub fn resolve_deps_by_recursive_backtracking(
         }
     }
 
+    // 循環参照チェック
+    fn has_transitive_dependency(
+        registry: &PackageRegistry,
+        assigned: &HashMap<PackageName, Version>,
+        start: &PackageName,
+        target: &PackageName,
+        root_package_name: &str,
+        root_deps: &Vec<(PackageName, Constraint)>,
+    ) -> bool {
+        let mut visited = HashSet::new();
+        let mut stack = vec![start.clone()];
+        visited.insert(start.clone());
+
+        while let Some(current) = stack.pop() {
+            let deps_opt = if current == root_package_name {
+                Some(root_deps)
+            } else {
+                assigned
+                    .get(&current)
+                    .and_then(|v| registry.get_deps(&current, v))
+            };
+
+            if let Some(deps) = deps_opt {
+                for (dep_name, _) in deps {
+                    if dep_name == target {
+                        return true;
+                    }
+                    if assigned.contains_key(dep_name) && !visited.contains(dep_name) {
+                        visited.insert(dep_name.clone());
+                        stack.push(dep_name.clone());
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    // 深さ優先的にパッケージの依存関係を解決できるか再帰的に確認し、最終的に解決できそうならそのペッケージ情報を返す。
     fn recursive(
         registry: &PackageRegistry,
         root_package_name: &str,
@@ -483,6 +521,20 @@ pub fn resolve_deps_by_recursive_backtracking(
                             }
                             // 既に解決済みのパッケージに対して、この候補が持つ制約が矛盾しないか
                             else if let Some(assigned_dev_version) = assigned.get(dep_name) {
+                                // 循環参照チェック
+                                if has_transitive_dependency(
+                                    registry,
+                                    assigned,
+                                    dep_name,
+                                    &package_name,
+                                    root_package_name,
+                                    root_deps,
+                                ) {
+                                    consistent = false;
+                                    rejection_reasons
+                                        .push(format!("Cycle detected with {}", dep_name));
+                                    break;
+                                }
                                 if !dep_constraint.is_satisfied(*assigned_dev_version) {
                                     consistent = false;
                                     break;
@@ -836,12 +888,7 @@ mod tests {
         let result =
             resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
 
-        assert!(result.is_ok());
-        let graph = result.unwrap();
-        println!("{:#?}", graph);
-        assert_eq!(graph.len(), 2 + 1); // +1はルート分
-        assert_eq!(graph.get("A").unwrap().version, v1);
-        assert_eq!(graph.get("B").unwrap().version, v1);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -909,5 +956,218 @@ mod tests {
             resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_backtracking_complex() {
+        // Root -> A, B
+        // A -> C ^1.0.0
+        // B -> D ^1.0.0
+        // C 1.1.0 -> D ^2.0.0
+        // C 1.0.0 -> D ^1.0.0
+        // D 2.0.0, 1.0.0
+        //
+        // 単純な貪欲法でCの最新(1.1.0)を選ぶと、Dは2.0.0になる必要があるが、
+        // BがD ^1.0.0を要求しているため競合する。
+        // バックトラックしてC 1.0.0を選ぶことで、D 1.0.0となり、Bの要求も満たせる。
+
+        let mut registry = PackageRegistry::new();
+        let v100 = Version::new(1, 0, 0);
+        let v110 = Version::new(1, 1, 0);
+        let v200 = Version::new(2, 0, 0);
+
+        registry.add_package("D", v100, PackageInfo::new(vec![]));
+        registry.add_package("D", v200, PackageInfo::new(vec![]));
+
+        registry.add_package(
+            "C",
+            v110,
+            PackageInfo::new(vec![("D".to_string(), "^2.0.0".parse().unwrap())]),
+        );
+        registry.add_package(
+            "C",
+            v100,
+            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+
+        registry.add_package(
+            "A",
+            v100,
+            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+        registry.add_package(
+            "B",
+            v100,
+            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+
+        let root_version: Version = "0.1.0".parse().unwrap();
+        let root_deps = vec![
+            ("A".to_string(), "^1.0.0".parse().unwrap()),
+            ("B".to_string(), "^1.0.0".parse().unwrap()),
+        ];
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
+
+        assert!(result.is_ok());
+        let graph = result.unwrap();
+
+        // Cは1.0.0が選ばれているはず
+        assert_eq!(graph.get("C").unwrap().version, v100);
+        // Dは1.0.0が選ばれているはず
+        assert_eq!(graph.get("D").unwrap().version, v100);
+    }
+
+    #[test]
+    fn resolve_shared_dependency_narrowing() {
+        // Root -> A, B
+        // A -> Shared ^1.0.0
+        // B -> Shared ^1.5.0
+        // Shared 1.0.0, 1.4.0, 1.6.0
+        // 両方の制約を満たす 1.6.0 が選ばれるべき
+
+        let mut registry = PackageRegistry::new();
+        let v100 = Version::new(1, 0, 0);
+
+        registry.add_package("Shared", Version::new(1, 0, 0), PackageInfo::new(vec![]));
+        registry.add_package("Shared", Version::new(1, 4, 0), PackageInfo::new(vec![]));
+        registry.add_package("Shared", Version::new(1, 6, 0), PackageInfo::new(vec![]));
+
+        registry.add_package(
+            "A",
+            v100,
+            PackageInfo::new(vec![("Shared".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+        registry.add_package(
+            "B",
+            v100,
+            PackageInfo::new(vec![("Shared".to_string(), "^1.5.0".parse().unwrap())]),
+        );
+
+        let root_version: Version = "0.1.0".parse().unwrap();
+        let root_deps = vec![
+            ("A".to_string(), "^1.0.0".parse().unwrap()),
+            ("B".to_string(), "^1.0.0".parse().unwrap()),
+        ];
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
+
+        assert!(result.is_ok());
+        let graph = result.unwrap();
+        assert_eq!(graph.get("Shared").unwrap().version, Version::new(1, 6, 0));
+    }
+
+    #[test]
+    fn resolve_fail_indirect_circular_dependency() {
+        // A -> B -> C -> A
+        let mut registry = PackageRegistry::new();
+        let v1 = Version::new(1, 0, 0);
+
+        registry.add_package(
+            "A",
+            v1,
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+        registry.add_package(
+            "B",
+            v1,
+            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+        registry.add_package(
+            "C",
+            v1,
+            PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+
+        let root_version: Version = "0.1.0".parse().unwrap();
+        let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
+
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.contains("Cycle detected"));
+    }
+
+    #[test]
+    fn resolve_deep_dependency_chain() {
+        // A->B->C->D->E
+        let mut registry = PackageRegistry::new();
+        let v1 = Version::new(1, 0, 0);
+
+        registry.add_package("E", v1, PackageInfo::new(vec![]));
+        registry.add_package(
+            "D",
+            v1,
+            PackageInfo::new(vec![("E".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+        registry.add_package(
+            "C",
+            v1,
+            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+        registry.add_package(
+            "B",
+            v1,
+            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+        registry.add_package(
+            "A",
+            v1,
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+
+        let root_version: Version = "0.1.0".parse().unwrap();
+        let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
+
+        assert!(result.is_ok());
+        let graph = result.unwrap();
+        assert_eq!(graph.len(), 6); // Root + A,B,C,D,E
+    }
+
+    #[test]
+    fn resolve_exact_strategy_chain() {
+        // A -> B =1.0.0
+        // B 1.0.0 -> C =1.0.0
+        // B 1.1.0 -> C =1.1.0
+        // C 1.0.0
+        // C 1.1.0
+
+        let mut registry = PackageRegistry::new();
+        let v100 = Version::new(1, 0, 0);
+        let v110 = Version::new(1, 1, 0);
+
+        registry.add_package("C", v100, PackageInfo::new(vec![]));
+        registry.add_package("C", v110, PackageInfo::new(vec![]));
+
+        registry.add_package(
+            "B",
+            v100,
+            PackageInfo::new(vec![("C".to_string(), "=1.0.0".parse().unwrap())]),
+        );
+        registry.add_package(
+            "B",
+            v110,
+            PackageInfo::new(vec![("C".to_string(), "=1.1.0".parse().unwrap())]),
+        );
+
+        registry.add_package(
+            "A",
+            v100,
+            PackageInfo::new(vec![("B".to_string(), "=1.0.0".parse().unwrap())]),
+        );
+
+        let root_version: Version = "0.1.0".parse().unwrap();
+        let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
+
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
+
+        assert!(result.is_ok());
+        let graph = result.unwrap();
+        assert_eq!(graph.get("B").unwrap().version, v100);
+        assert_eq!(graph.get("C").unwrap().version, v100);
     }
 }
