@@ -470,12 +470,12 @@ pub fn resolve_deps_by_recursive_backtracking(
                         // 依存先の整合性チェック（既に解決済みのパッケージに対して、この候補が持つ制約が矛盾しないか）
                         let mut consistent = true;
                         for (dep_name, dep_constraint) in candidate_package_info.get_deps() {
-                            // 自分自身への依存の場合、候補バージョン自身でチェック
+                            // 自分自身への依存の場合はそもそもの依存先の指定がおかしいということでエラーにする
                             if dep_name == &package_name {
-                                if !dep_constraint.is_satisfied(*candidate_version) {
-                                    consistent = false;
-                                    break;
-                                }
+                                return Err(format!(
+                                    "Invalid self dependency for {} package.",
+                                    package_name
+                                ));
                             }
                             // 既に解決済みのパッケージに対して、この候補が持つ制約が矛盾しないか
                             else if let Some(existing_ver) = assigned.get(dep_name) {
@@ -829,6 +829,49 @@ mod tests {
 
         let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
         let result = resolve_deps_by_recursive_backtracking(&registry, "A", &root_deps);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_fail_direct_self_dependency_in_package() {
+        let mut registry = PackageRegistry::new();
+        let v1 = Version::new(1, 0, 0);
+
+        // A -> A ^1.0.0
+        registry.add_package(
+            "A",
+            v1,
+            PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+
+        let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
+        let result = resolve_deps_by_recursive_backtracking(&registry, "ROOT", &root_deps);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_fail_indirect_self_dependency_in_package() {
+        let mut registry = PackageRegistry::new();
+        let v1 = Version::new(1, 0, 0);
+
+        // A -> B ^1.0.0
+        registry.add_package(
+            "A",
+            v1,
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+
+        // B -> B ^1.0.0
+        registry.add_package(
+            "B",
+            v1,
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+        );
+
+        let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
+        let result = resolve_deps_by_recursive_backtracking(&registry, "ROOT", &root_deps);
 
         assert!(result.is_err());
     }
