@@ -54,9 +54,11 @@ fn resolve_by_recursive_backtracking() {
         ]),
     );
 
+    let root_version: Version = "0.1.0".parse().unwrap();
     let root_deps: Vec<(PackageName, Constraint)> =
         vec![("A".to_string(), "^1.0.0".parse().unwrap())];
-    let result = resolve_deps_by_recursive_backtracking(&registry, "ROOT", &root_deps);
+    let result =
+        resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
 
     let graph = result.unwrap();
 
@@ -107,9 +109,10 @@ fn resolve_by_pub_grub() {
         ]),
     );
 
+    let root_version: Version = "0.1.0".parse().unwrap();
     let root_deps: Vec<(PackageName, Constraint)> =
         vec![("A".to_string(), "^1.0.0".parse().unwrap())];
-    let result = resolve_deps_by_pub_grub(&registry, "ROOT", &root_deps);
+    let result = resolve_deps_by_pub_grub(&registry, "ROOT", root_version, &root_deps);
 
     let graph = result.unwrap();
 

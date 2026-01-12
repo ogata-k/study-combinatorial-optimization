@@ -361,6 +361,7 @@ pub type ResolvedGraph = HashMap<PackageName, ResolvedPackageInfo>;
 pub fn resolve_deps_by_recursive_backtracking(
     registry: &PackageRegistry,
     root_package_name: &str,
+    root_package_version: Version,
     root_deps: &Vec<(PackageName, Constraint)>,
 ) -> Result<ResolvedGraph, String> {
     let mut assigned: HashMap<PackageName, Version> = HashMap::new();
@@ -527,13 +528,23 @@ pub fn resolve_deps_by_recursive_backtracking(
         }
     }
 
-    recursive(registry, root_package_name, root_deps, &mut assigned)
+    recursive(registry, root_package_name, root_deps, &mut assigned).map(|mut graph| {
+        graph.insert(
+            root_package_name.to_string(),
+            ResolvedPackageInfo::new(
+                root_package_version,
+                root_deps.iter().map(|(name, _)| name.clone()).collect(),
+            ),
+        );
+        graph
+    })
 }
 
 /// PubGrub (Next-Generation Version Solving)という方法でバージョン依存を解決する
 pub fn resolve_deps_by_pub_grub(
     registry: &PackageRegistry,
     root_package_name: &str,
+    root_package_version: Version,
     root_deps: &Vec<(PackageName, Constraint)>,
 ) -> Result<ResolvedGraph, String> {
     todo!()
@@ -706,9 +717,11 @@ mod tests {
             ]),
         );
 
+        let root_version: Version = "0.1.0".parse().unwrap();
         let root_deps: Vec<(PackageName, Constraint)> =
             vec![("A".to_string(), "^1.0.0".parse().unwrap())];
-        let result = resolve_deps_by_recursive_backtracking(&registry, "ROOT", &root_deps);
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
 
         assert!(result.is_ok());
         let graph = result.unwrap();
@@ -731,8 +744,10 @@ mod tests {
             PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
         );
 
+        let root_version: Version = "0.1.0".parse().unwrap();
         let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
-        let result = resolve_deps_by_recursive_backtracking(&registry, "ROOT", &root_deps);
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
 
         assert!(result.is_err());
         let err = result.err().unwrap();
@@ -752,8 +767,10 @@ mod tests {
         // B 1.0.0 only
         registry.add_package("B", v1, PackageInfo::new(vec![]));
 
+        let root_version: Version = "0.1.0".parse().unwrap();
         let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
-        let result = resolve_deps_by_recursive_backtracking(&registry, "ROOT", &root_deps);
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
 
         assert!(result.is_err());
         // エラーメッセージにはBの解決失敗が含まれるはず
@@ -785,17 +802,19 @@ mod tests {
             PackageInfo::new(vec![("C".to_string(), "^2.0.0".parse().unwrap())]),
         );
 
+        let root_version: Version = "0.1.0".parse().unwrap();
         let root_deps = vec![
             ("A".to_string(), "^1.0.0".parse().unwrap()),
             ("B".to_string(), "^1.0.0".parse().unwrap()),
         ];
-        let result = resolve_deps_by_recursive_backtracking(&registry, "ROOT", &root_deps);
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
 
         assert!(result.is_err());
     }
 
     #[test]
-    fn resolve_circular_dependency() {
+    fn resolve_fail_circular_dependency() {
         let mut registry = PackageRegistry::new();
         let v1 = Version::new(1, 0, 0);
 
@@ -812,13 +831,15 @@ mod tests {
             PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())]),
         );
 
+        let root_version: Version = "0.1.0".parse().unwrap();
         let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
-        let result = resolve_deps_by_recursive_backtracking(&registry, "ROOT", &root_deps);
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
 
         assert!(result.is_ok());
         let graph = result.unwrap();
         println!("{:#?}", graph);
-        assert_eq!(graph.len(), 2);
+        assert_eq!(graph.len(), 2 + 1); // +1はルート分
         assert_eq!(graph.get("A").unwrap().version, v1);
         assert_eq!(graph.get("B").unwrap().version, v1);
     }
@@ -835,8 +856,10 @@ mod tests {
             PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())]),
         );
 
+        let root_version: Version = "0.1.0".parse().unwrap();
         let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
-        let result = resolve_deps_by_recursive_backtracking(&registry, "A", &root_deps);
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "A", root_version, &root_deps);
 
         assert!(result.is_err());
     }
@@ -853,8 +876,10 @@ mod tests {
             PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())]),
         );
 
+        let root_version: Version = "0.1.0".parse().unwrap();
         let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
-        let result = resolve_deps_by_recursive_backtracking(&registry, "ROOT", &root_deps);
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
 
         assert!(result.is_err());
     }
@@ -878,8 +903,10 @@ mod tests {
             PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
         );
 
+        let root_version: Version = "0.1.0".parse().unwrap();
         let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
-        let result = resolve_deps_by_recursive_backtracking(&registry, "ROOT", &root_deps);
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
 
         assert!(result.is_err());
     }
