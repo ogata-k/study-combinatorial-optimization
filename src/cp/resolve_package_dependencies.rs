@@ -610,6 +610,16 @@ pub fn resolve_deps_by_recursive_backtracking(
     })
 }
 
+/// DPLL(Davis-Putnam-Logemann-Loveland)という方法でバージョン依存を解決する
+pub fn resolve_deps_by_dpll(
+    registry: &PackageRegistry,
+    root_package_name: &str,
+    root_package_version: Version,
+    root_deps: &Vec<(PackageName, Constraint)>,
+) -> Result<ResolvedGraph, String> {
+    todo!()
+}
+
 /// PubGrub (Next-Generation Version Solving)という方法でバージョン依存を解決する
 pub fn resolve_deps_by_pub_grub(
     registry: &PackageRegistry,
