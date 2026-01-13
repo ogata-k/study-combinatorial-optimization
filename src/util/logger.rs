@@ -1,6 +1,7 @@
-//! ログ出力用のヘルパー
+//! ログ出力用のヘルパーモジュール
 use log::{Level, LevelFilter, Metadata, Record, SetLoggerError};
 
+/// プリントするだけのロガー
 pub struct SimpleLogger;
 
 impl log::Log for SimpleLogger {
