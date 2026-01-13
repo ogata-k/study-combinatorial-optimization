@@ -1,18 +1,25 @@
 //! パッケージの依存関係を解決するように、指定したバージョンの制約を満たしつつ適当なインストール順に並べたパッケージの一覧を求める
 
+use log::{debug, info};
 use study_combinatorial_optimization::cp::resolve_package_dependencies::{
     Constraint, PackageInfo, PackageName, PackageRegistry, Version, resolve_deps_by_pub_grub,
     resolve_deps_by_recursive_backtracking,
 };
+use study_combinatorial_optimization::util::logger::SimpleLogger;
 
 fn main() {
+    if let Err(e) = SimpleLogger::init() {
+        eprintln!("SimpleLogger error: {}", e);
+        return;
+    }
+
     resolve_by_recursive_backtracking();
-    println!("\n-------------------------\n");
+    info!("\n-------------------------\n");
     resolve_by_pub_grub();
 }
 
 fn resolve_by_recursive_backtracking() {
-    println!("resolve dependencies by Recursive Backtracking");
+    info!("resolve dependencies by Recursive Backtracking");
     // A -> B (^1.0.0), C (^1.0.0)
     // B -> D (^1.0.0)
     // C -> D (^1.1.0)
@@ -63,11 +70,11 @@ fn resolve_by_recursive_backtracking() {
     let graph = result.unwrap();
 
     // TODO グラフ描画
-    println!("{:#?}", graph);
+    debug!("{:#?}", graph);
 }
 
 fn resolve_by_pub_grub() {
-    println!("resolve dependencies by PubGrub");
+    info!("resolve dependencies by PubGrub");
     // A -> B (^1.0.0), C (^1.0.0)
     // B -> D (^1.0.0)
     // C -> D (^1.1.0)
@@ -117,5 +124,5 @@ fn resolve_by_pub_grub() {
     let graph = result.unwrap();
 
     // TODO グラフ描画
-    println!("{:#?}", graph);
+    debug!("{:#?}", graph);
 }

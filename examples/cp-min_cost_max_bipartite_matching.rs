@@ -1,13 +1,20 @@
 //! 左の集合の要素を右の集合の要素へコスト付きで割当をするとき、その割当コストを最小にする最大のマッチングを求める問題を解く
 
+use log::info;
 use std::fmt::Display;
 use std::hash::Hash;
 use study_combinatorial_optimization::cp::matching_by_pdpd::{
     Cost, MinCostMaxBipartiteMatching, TotalCost,
 };
 use study_combinatorial_optimization::util::indexer::{BTreeIndexer, Indexer};
+use study_combinatorial_optimization::util::logger::SimpleLogger;
 
 fn main() {
+    if let Err(e) = SimpleLogger::init() {
+        eprintln!("SimpleLogger error: {}", e);
+        return;
+    }
+
     example_1();
 }
 
@@ -16,7 +23,7 @@ fn example<Left: Display + Eq + Hash + Ord + Clone, Right: Display + Eq + Hash +
     candidates: Vec<(Left, Right, Cost)>,
     expect_total_cost: TotalCost,
 ) {
-    println!("\n--- Example : {description} ---");
+    info!("\n--- Example : {description} ---");
 
     let left_all_data: Vec<Left> = candidates.iter().map(|e| e.0.clone()).collect();
     let right_all_data: Vec<Right> = candidates.iter().map(|e| e.1.clone()).collect();
@@ -37,23 +44,23 @@ fn example<Left: Display + Eq + Hash + Ord + Clone, Right: Display + Eq + Hash +
 
     let result = solver.solve();
 
-    println!("\n--- Solved with following result ---");
-    println!("Matching Cost : {}", result.0);
-    println!("Match:");
+    info!("Solved with following result");
+    info!("Matching Cost : {}", result.0);
+    info!("Match:");
     for match_pair in result.1.iter() {
         let left = match_pair.0;
         let left_label = left_indexer.to_value(left).unwrap();
         match match_pair.1 {
             None => {
-                println!("{} -- None", left_label);
+                info!("{} -- None", left_label);
             }
             Some((right, cost)) => {
                 let right_label = right_indexer.to_value(right).unwrap();
-                println!(" {} --- {}  with cost {}", left_label, right_label, cost);
+                info!(" {} --- {}  with cost {}", left_label, right_label, cost);
             }
         }
     }
-    println!();
+    info!("");
 
     assert_eq!(expect_total_cost, result.0);
     assert_eq!(
