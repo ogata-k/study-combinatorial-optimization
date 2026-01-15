@@ -660,8 +660,13 @@ pub fn simulate_parallel_install(
 ) {
     const TIME_FORMAT: &'static str = "%Y/%m/%d %H:%M:%S%.3f";
 
-    let mut in_degree = HashMap::new();
+    // 依存関係グラフ (A -> B: AはBに依存) のままでは、
+    // 「Bのインストールが完了したときに、Bに依存しているAのカウンタを減らす」という操作を効率的に行えない（逆引きができない）。
+    // そのため、逆向きの辺 (B -> A: BはAに必要とされている) を持つグラフ (adjacency_list) を構築する。
     let mut adjacency_list: HashMap<PackageName, Vec<PackageName>> = HashMap::new();
+    // 上で作った反転グラフ (インストール順序グラフ) における入次数を管理する。
+    // これは「そのパッケージが依存しているパッケージの数（未インストールの依存先数）」に等しい。
+    let mut in_degree = HashMap::new();
     let all_packages: Vec<PackageName> = graph.keys().cloned().collect();
 
     // 1. グラフ構造の初期化
@@ -675,6 +680,7 @@ pub fn simulate_parallel_install(
                 .entry(dep.clone())
                 .or_default()
                 .push(package.clone());
+            // `package` は `dep` に依存しているので、`package` の入次数を増やす
             *in_degree.entry(package.clone()).or_insert(0) += 1;
         }
     }
@@ -687,9 +693,18 @@ pub fn simulate_parallel_install(
     // インストール可能キュー
     let mut ready_queue: VecDeque<PackageName> = all_packages
         .iter()
+        // 初期状態は何も依存していないパッケージが対象
+        // 依存関係の解決をしたために絶対一つはあるので問題ない
         .filter(|p| *in_degree.lock().unwrap().get(*p).unwrap() == 0)
         .cloned()
         .collect();
+
+    if ready_queue.is_empty() {
+        panic!(
+            "Unknown error by installable packages. adjacency_list: {:?}, in_degree: {:?}",
+            adjacency_list, in_degree
+        );
+    }
 
     let mut installed_count = 0;
     let mut active_workers = 0;
@@ -747,7 +762,9 @@ pub fn simulate_parallel_install(
             let mut degree_lock = in_degree.lock().unwrap();
             for dep in dependents {
                 let count = degree_lock.get_mut(dep).unwrap();
+                // トポロジカルソートのために減らす
                 *count -= 1;
+                // 依存がない、つまり依存先を待たずにインストールに進むことができるものが見つかったことになるので、次の太陽の
                 if *count == 0 {
                     ready_queue.push_back(dep.clone());
                 }
