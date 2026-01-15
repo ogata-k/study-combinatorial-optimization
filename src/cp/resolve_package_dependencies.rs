@@ -617,6 +617,11 @@ pub fn resolve_deps_by_dpll(
     root_package_version: Version,
     root_deps: &Vec<(PackageName, Constraint)>,
 ) -> Result<ResolvedGraph, String> {
+    // cf. https://qiita.com/tmk0308/items/34c0bbf09ae0633b3c5e
+    // cf. https://ja.wikipedia.org/wiki/DPLL%E3%82%A2%E3%83%AB%E3%82%B4%E3%83%AA%E3%82%BA%E3%83%A0
+    // cf. https://zenn.dev/semiexp/books/e559bbd5ab00a2/viewer/6f1878
+    // cf. https://github.com/motok822/pubgrub-cpp/blob/main/src/dpll_solver.cpp
+
     todo!()
 }
 
@@ -627,6 +632,10 @@ pub fn resolve_deps_by_pub_grub(
     root_package_version: Version,
     root_deps: &Vec<(PackageName, Constraint)>,
 ) -> Result<ResolvedGraph, String> {
+    // cf. https://qiita.com/tmk0308/items/34c0bbf09ae0633b3c5e
+    // cf. https://crates.io/crates/pubgrub
+    // cf. https://docs.rs/pubgrub/0.3.0/src/pubgrub/solver.rs.html#108-248
+
     todo!()
 }
 

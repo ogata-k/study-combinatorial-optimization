@@ -67,6 +67,7 @@ fn main() {
         &root_deps,
         resolve_deps_by_recursive_backtracking,
     );
+    /* @todo 実装したらコメントアウトを解除
     info!("\n-------------------------\n");
     resolve(
         "DPLL",
@@ -76,15 +77,18 @@ fn main() {
         &root_deps,
         resolve_deps_by_dpll,
     );
-    info!("\n-------------------------\n");
-    resolve(
-        "PubGrub",
-        &registry,
-        root_package_name,
-        root_version,
-        &root_deps,
-        resolve_deps_by_pub_grub,
-    );
+    */
+    /* @todo 実装したらコメントアウトを解除
+     info!("\n-------------------------\n");
+     resolve(
+         "PubGrub",
+         &registry,
+         root_package_name,
+         root_version,
+         &root_deps,
+         resolve_deps_by_pub_grub,
+     );
+    */
 }
 
 fn resolve<ResolveFn>(
