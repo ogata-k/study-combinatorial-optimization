@@ -1,11 +1,15 @@
 //! パッケージの依存関係を解決するように、指定したバージョンの制約を満たしつつ適当なインストール順に並べたパッケージの一覧を求めるためのモジュール
 
+use log::info;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, HashSet, btree_map};
-use std::fmt;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque, btree_map};
 use std::fmt::Formatter;
 use std::ops::RangeBounds;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread::yield_now;
+use std::time::Duration;
+use std::{fmt, thread, time};
 
 /// パッケージのバージョン。
 /// セマンティックバージョンを想定。
@@ -231,16 +235,25 @@ pub type PackageDependence = (PackageName, Constraint);
 #[derive(Debug, Clone)]
 pub struct PackageInfo {
     deps: Vec<PackageDependence>,
+    install_time_ms: u64,
 }
 
 impl PackageInfo {
-    pub fn new(deps: Vec<PackageDependence>) -> Self {
-        Self { deps }
+    pub fn new(deps: Vec<PackageDependence>, install_time_ms: u64) -> Self {
+        Self {
+            deps,
+            install_time_ms,
+        }
     }
 
     /// 依存先の情報を取得
     pub fn get_deps(&self) -> &Vec<PackageDependence> {
         &self.deps
+    }
+
+    /// インストールにかかる時間を取得
+    pub fn get_install_time_ms(&self) -> u64 {
+        self.install_time_ms
     }
 }
 
@@ -639,6 +652,112 @@ pub fn resolve_deps_by_pub_grub(
     todo!()
 }
 
+/// resolve系メソッドで依存関係を解決したことで得られたグラフ構造を使って、パッケージを並列でダウンロードする。
+pub fn simulate_parallel_install(
+    registry: &PackageRegistry,
+    graph: &ResolvedGraph,
+    worker_count: usize,
+) {
+    const TIME_FORMAT: &'static str = "%Y/%m/%d %H:%M:%S%.3f";
+
+    let mut in_degree = HashMap::new();
+    let mut adjacency_list: HashMap<PackageName, Vec<PackageName>> = HashMap::new();
+    let all_packages: Vec<PackageName> = graph.keys().cloned().collect();
+
+    // 1. グラフ構造の初期化
+    for package in &all_packages {
+        in_degree.insert(package.clone(), 0);
+    }
+
+    for (package, info) in graph {
+        for dep in info.get_dependencies() {
+            adjacency_list
+                .entry(dep.clone())
+                .or_default()
+                .push(package.clone());
+            *in_degree.entry(package.clone()).or_insert(0) += 1;
+        }
+    }
+
+    // スレッド間で共有するための状態管理
+    let in_degree = Arc::new(Mutex::new(in_degree));
+    let adjacency_list = Arc::new(adjacency_list);
+    let (tx, rx) = mpsc::channel(); // 完了通知用チャンネル
+
+    // インストール可能キュー
+    let mut ready_queue: VecDeque<PackageName> = all_packages
+        .iter()
+        .filter(|p| *in_degree.lock().unwrap().get(*p).unwrap() == 0)
+        .cloned()
+        .collect();
+
+    let mut installed_count = 0;
+    let mut active_workers = 0;
+
+    info!("--- 並列インストール開始 (Workers: {}) ---", worker_count);
+
+    loop {
+        // A. インストール可能なものがあり、ワーカーに空きがあればスレッドを起動
+        while !ready_queue.is_empty() && active_workers < worker_count {
+            let package_name = ready_queue.pop_front().unwrap();
+
+            // パッケージのインストール時間を取得
+            let version = graph.get(&package_name).unwrap().get_version();
+            let install_time_ms = registry
+                .packages
+                .get(&package_name)
+                .and_then(|entry| entry.get_package_info(version))
+                .map(|info| info.get_install_time_ms())
+                .unwrap_or(0);
+
+            let tx_clone = tx.clone();
+            let package_name_clone = package_name.clone();
+
+            active_workers += 1;
+
+            thread::spawn(move || {
+                info!(
+                    "[{}]\t[開始] {}",
+                    chrono::Local::now().format(TIME_FORMAT),
+                    package_name_clone
+                );
+                thread::sleep(Duration::from_millis(install_time_ms)); // インストール中...
+                tx_clone.send(package_name_clone).unwrap();
+            });
+        }
+
+        if active_workers == 0 && ready_queue.is_empty() {
+            break; // すべて完了
+        }
+
+        // B. いずれかのスレッドが終わるのを待つ
+        let finished_package = rx.recv().unwrap();
+        active_workers -= 1;
+        installed_count += 1;
+        info!(
+            "[{}]\t  [完了] {} (進捗: {}/{})",
+            chrono::Local::now().format(TIME_FORMAT),
+            finished_package,
+            installed_count,
+            all_packages.len()
+        );
+
+        // C. 終わったパッケージに依存していたもののロックを解除
+        if let Some(dependents) = adjacency_list.get(&finished_package) {
+            let mut degree_lock = in_degree.lock().unwrap();
+            for dep in dependents {
+                let count = degree_lock.get_mut(dep).unwrap();
+                *count -= 1;
+                if *count == 0 {
+                    ready_queue.push_back(dep.clone());
+                }
+            }
+        }
+    }
+
+    info!("--- すべてのインストールが正常に完了しました ---");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -726,10 +845,10 @@ mod tests {
         let v120 = Version::new(1, 2, 0);
         let v200 = Version::new(2, 0, 0);
 
-        entry.add_version(v100, PackageInfo::new(vec![]));
-        entry.add_version(v110, PackageInfo::new(vec![]));
-        entry.add_version(v120, PackageInfo::new(vec![]));
-        entry.add_version(v200, PackageInfo::new(vec![]));
+        entry.add_version(v100, PackageInfo::new(vec![], 10));
+        entry.add_version(v110, PackageInfo::new(vec![], 10));
+        entry.add_version(v120, PackageInfo::new(vec![], 10));
+        entry.add_version(v200, PackageInfo::new(vec![], 10));
 
         // 全範囲
         assert_eq!(entry.get_versions(..).count(), 4);
@@ -749,7 +868,7 @@ mod tests {
         let v1 = Version::new(1, 0, 0);
         let dep = ("OtherPkg".to_string(), "^1.0.0".parse().unwrap());
 
-        registry.add_package("MyPkg", v1, PackageInfo::new(vec![dep.clone()]));
+        registry.add_package("MyPkg", v1, PackageInfo::new(vec![dep.clone()], 10));
 
         // 存在するパッケージとバージョン
         let deps = registry.get_deps("MyPkg", &v1);
@@ -778,32 +897,35 @@ mod tests {
         let v120 = Version::new(1, 2, 0);
 
         // D
-        registry.add_package("D", v100, PackageInfo::new(vec![]));
-        registry.add_package("D", v110, PackageInfo::new(vec![]));
-        registry.add_package("D", v120, PackageInfo::new(vec![]));
+        registry.add_package("D", v100, PackageInfo::new(vec![], 10));
+        registry.add_package("D", v110, PackageInfo::new(vec![], 10));
+        registry.add_package("D", v120, PackageInfo::new(vec![], 10));
 
         // B -> D ^1.0.0
         registry.add_package(
             "B",
             v100,
-            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         // C -> D ^1.1.0
         registry.add_package(
             "C",
             v100,
-            PackageInfo::new(vec![("D".to_string(), "^1.1.0".parse().unwrap())]),
+            PackageInfo::new(vec![("D".to_string(), "^1.1.0".parse().unwrap())], 10),
         );
 
         // A -> B, C
         registry.add_package(
             "A",
             v100,
-            PackageInfo::new(vec![
-                ("B".to_string(), "^1.0.0".parse().unwrap()),
-                ("C".to_string(), "^1.0.0".parse().unwrap()),
-            ]),
+            PackageInfo::new(
+                vec![
+                    ("B".to_string(), "^1.0.0".parse().unwrap()),
+                    ("C".to_string(), "^1.0.0".parse().unwrap()),
+                ],
+                10,
+            ),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -830,7 +952,7 @@ mod tests {
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -851,10 +973,10 @@ mod tests {
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("B".to_string(), "^2.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("B".to_string(), "^2.0.0".parse().unwrap())], 10),
         );
         // B 1.0.0 only
-        registry.add_package("B", v1, PackageInfo::new(vec![]));
+        registry.add_package("B", v1, PackageInfo::new(vec![], 10));
 
         let root_version: Version = "0.1.0".parse().unwrap();
         let root_deps = vec![("A".to_string(), "^1.0.0".parse().unwrap())];
@@ -877,18 +999,18 @@ mod tests {
         // B -> C ^2.0.0
         // C has 1.0.0 and 2.0.0
 
-        registry.add_package("C", Version::new(1, 0, 0), PackageInfo::new(vec![]));
-        registry.add_package("C", Version::new(2, 0, 0), PackageInfo::new(vec![]));
+        registry.add_package("C", Version::new(1, 0, 0), PackageInfo::new(vec![], 10));
+        registry.add_package("C", Version::new(2, 0, 0), PackageInfo::new(vec![], 10));
 
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
         registry.add_package(
             "B",
             v1,
-            PackageInfo::new(vec![("C".to_string(), "^2.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("C".to_string(), "^2.0.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -911,13 +1033,13 @@ mod tests {
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
         // B -> A ^1.0.0
         registry.add_package(
             "B",
             v1,
-            PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -937,7 +1059,7 @@ mod tests {
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -957,7 +1079,7 @@ mod tests {
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -977,14 +1099,14 @@ mod tests {
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         // B -> B ^1.0.0
         registry.add_package(
             "B",
             v1,
-            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -1013,29 +1135,29 @@ mod tests {
         let v110 = Version::new(1, 1, 0);
         let v200 = Version::new(2, 0, 0);
 
-        registry.add_package("D", v100, PackageInfo::new(vec![]));
-        registry.add_package("D", v200, PackageInfo::new(vec![]));
+        registry.add_package("D", v100, PackageInfo::new(vec![], 10));
+        registry.add_package("D", v200, PackageInfo::new(vec![], 10));
 
         registry.add_package(
             "C",
             v110,
-            PackageInfo::new(vec![("D".to_string(), "^2.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("D".to_string(), "^2.0.0".parse().unwrap())], 10),
         );
         registry.add_package(
             "C",
             v100,
-            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         registry.add_package(
             "A",
             v100,
-            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
         registry.add_package(
             "B",
             v100,
-            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -1066,19 +1188,31 @@ mod tests {
         let mut registry = PackageRegistry::new();
         let v100 = Version::new(1, 0, 0);
 
-        registry.add_package("Shared", Version::new(1, 0, 0), PackageInfo::new(vec![]));
-        registry.add_package("Shared", Version::new(1, 4, 0), PackageInfo::new(vec![]));
-        registry.add_package("Shared", Version::new(1, 6, 0), PackageInfo::new(vec![]));
+        registry.add_package(
+            "Shared",
+            Version::new(1, 0, 0),
+            PackageInfo::new(vec![], 10),
+        );
+        registry.add_package(
+            "Shared",
+            Version::new(1, 4, 0),
+            PackageInfo::new(vec![], 10),
+        );
+        registry.add_package(
+            "Shared",
+            Version::new(1, 6, 0),
+            PackageInfo::new(vec![], 10),
+        );
 
         registry.add_package(
             "A",
             v100,
-            PackageInfo::new(vec![("Shared".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("Shared".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
         registry.add_package(
             "B",
             v100,
-            PackageInfo::new(vec![("Shared".to_string(), "^1.5.0".parse().unwrap())]),
+            PackageInfo::new(vec![("Shared".to_string(), "^1.5.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -1103,17 +1237,17 @@ mod tests {
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
         registry.add_package(
             "B",
             v1,
-            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
         registry.add_package(
             "C",
             v1,
-            PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("A".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -1132,26 +1266,26 @@ mod tests {
         let mut registry = PackageRegistry::new();
         let v1 = Version::new(1, 0, 0);
 
-        registry.add_package("E", v1, PackageInfo::new(vec![]));
+        registry.add_package("E", v1, PackageInfo::new(vec![], 10));
         registry.add_package(
             "D",
             v1,
-            PackageInfo::new(vec![("E".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("E".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
         registry.add_package(
             "C",
             v1,
-            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
         registry.add_package(
             "B",
             v1,
-            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("C".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -1176,24 +1310,24 @@ mod tests {
         let v100 = Version::new(1, 0, 0);
         let v110 = Version::new(1, 1, 0);
 
-        registry.add_package("C", v100, PackageInfo::new(vec![]));
-        registry.add_package("C", v110, PackageInfo::new(vec![]));
+        registry.add_package("C", v100, PackageInfo::new(vec![], 10));
+        registry.add_package("C", v110, PackageInfo::new(vec![], 10));
 
         registry.add_package(
             "B",
             v100,
-            PackageInfo::new(vec![("C".to_string(), "=1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("C".to_string(), "=1.0.0".parse().unwrap())], 10),
         );
         registry.add_package(
             "B",
             v110,
-            PackageInfo::new(vec![("C".to_string(), "=1.1.0".parse().unwrap())]),
+            PackageInfo::new(vec![("C".to_string(), "=1.1.0".parse().unwrap())], 10),
         );
 
         registry.add_package(
             "A",
             v100,
-            PackageInfo::new(vec![("B".to_string(), "=1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("B".to_string(), "=1.0.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -1217,7 +1351,7 @@ mod tests {
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("ROOT".to_string(), "^0.1.0".parse().unwrap())]),
+            PackageInfo::new(vec![("ROOT".to_string(), "^0.1.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();
@@ -1241,14 +1375,14 @@ mod tests {
         registry.add_package(
             "A",
             v1,
-            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())]),
+            PackageInfo::new(vec![("B".to_string(), "^1.0.0".parse().unwrap())], 10),
         );
 
         // B -> ROOT ^0.1.0 (Root package)
         registry.add_package(
             "B",
             v1,
-            PackageInfo::new(vec![("ROOT".to_string(), "^0.1.0".parse().unwrap())]),
+            PackageInfo::new(vec![("ROOT".to_string(), "^0.1.0".parse().unwrap())], 10),
         );
 
         let root_version: Version = "0.1.0".parse().unwrap();

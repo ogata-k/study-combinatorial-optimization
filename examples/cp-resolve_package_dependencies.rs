@@ -4,6 +4,7 @@ use log::{debug, info};
 use study_combinatorial_optimization::cp::resolve_package_dependencies::{
     Constraint, PackageInfo, PackageName, PackageRegistry, ResolvedGraph, Version,
     resolve_deps_by_dpll, resolve_deps_by_pub_grub, resolve_deps_by_recursive_backtracking,
+    simulate_parallel_install,
 };
 use study_combinatorial_optimization::util::logger::SimpleLogger;
 
@@ -26,32 +27,35 @@ fn main() {
     let v120 = Version::new(1, 2, 0);
 
     // D
-    registry.add_package("D", v100, PackageInfo::new(vec![]));
-    registry.add_package("D", v110, PackageInfo::new(vec![]));
-    registry.add_package("D", v120, PackageInfo::new(vec![]));
+    registry.add_package("D", v100, PackageInfo::new(vec![], 100));
+    registry.add_package("D", v110, PackageInfo::new(vec![], 100));
+    registry.add_package("D", v120, PackageInfo::new(vec![], 100));
 
     // B -> D ^1.0.0
     registry.add_package(
         "B",
         v100,
-        PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())]),
+        PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())], 200),
     );
 
     // C -> D ^1.1.0
     registry.add_package(
         "C",
         v100,
-        PackageInfo::new(vec![("D".to_string(), "^1.1.0".parse().unwrap())]),
+        PackageInfo::new(vec![("D".to_string(), "^1.1.0".parse().unwrap())], 300),
     );
 
     // A -> B, C
     registry.add_package(
         "A",
         v100,
-        PackageInfo::new(vec![
-            ("B".to_string(), "^1.0.0".parse().unwrap()),
-            ("C".to_string(), "^1.0.0".parse().unwrap()),
-        ]),
+        PackageInfo::new(
+            vec![
+                ("B".to_string(), "^1.0.0".parse().unwrap()),
+                ("C".to_string(), "^1.0.0".parse().unwrap()),
+            ],
+            400,
+        ),
     );
 
     let root_package_name = "ROOT";
@@ -112,6 +116,7 @@ fn resolve<ResolveFn>(
 
     let graph = result.unwrap();
 
-    // @todo グラフ描画もしくは、グラフを使ったインストールなどの処理
-    debug!("{:#?}", graph);
+    debug!("{:#?}\n", graph);
+
+    simulate_parallel_install(registry, &graph, 3);
 }
