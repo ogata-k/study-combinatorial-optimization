@@ -7,9 +7,8 @@ use std::fmt::Formatter;
 use std::ops::RangeBounds;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, mpsc};
-use std::thread::yield_now;
 use std::time::Duration;
-use std::{fmt, thread, time};
+use std::{fmt, thread};
 
 /// パッケージのバージョン。
 /// セマンティックバージョンを想定。
@@ -332,6 +331,14 @@ impl PackageRegistry {
         self.packages
             .get(name)
             .map(|entry| entry.get_package_info(version).map(|info| info.get_deps()))
+            .flatten()
+    }
+
+    /// 指定されたパッケージの指定されたバージョンのパッケージ情報を取得
+    fn get_package_info(&self, name: &str, version: &Version) -> Option<&PackageInfo> {
+        self.packages
+            .get(name)
+            .map(|entry| entry.get_package_info(version))
             .flatten()
     }
 }
@@ -660,6 +667,12 @@ pub fn simulate_parallel_install(
 ) {
     const TIME_FORMAT: &'static str = "%Y/%m/%d %H:%M:%S%.3f";
 
+    // インストール済みを表すキャッシュ
+    // 今は内部で初期化しているが、本来は外から渡して作成済みキャッシュストアを再利用したりする。
+    // 今回は、動作確認したいだけなので、キャッシュのストアは内部で初期化から破棄まで行っている。
+    let installed_cache: Arc<Mutex<HashSet<(PackageName, Version)>>> =
+        Arc::new(Mutex::new(HashSet::new()));
+
     // 依存関係グラフ (A -> B: AはBに依存) のままでは、
     // 「Bのインストールが完了したときに、Bに依存しているAのカウンタを減らす」という操作を効率的に行えない（逆引きができない）。
     // そのため、逆向きの辺 (B -> A: BはAに必要とされている) を持つグラフ (adjacency_list) を構築する。
@@ -674,7 +687,7 @@ pub fn simulate_parallel_install(
         in_degree.insert(package.clone(), 0);
     }
 
-    for (package, info) in graph {
+    for (package, info) in graph.iter() {
         for dep in info.get_dependencies() {
             adjacency_list
                 .entry(dep.clone())
@@ -711,68 +724,187 @@ pub fn simulate_parallel_install(
 
     info!("--- 並列インストール開始 (Workers: {}) ---", worker_count);
 
-    loop {
-        // A. インストール可能なものがあり、ワーカーに空きがあればスレッドを起動
-        while !ready_queue.is_empty() && active_workers < worker_count {
-            let package_name = ready_queue.pop_front().unwrap();
+    thread::scope(|s| {
+        loop {
+            // A. インストール可能なものがあり、ワーカーに空きがあればスレッドを起動
+            // ただし、今回はキャッシュを使うので、ワーカー数を考慮した処理はキャッシュを使わないことが確定してから行う
+            while !ready_queue.is_empty() {
+                let package_name = ready_queue.front().unwrap().clone();
+                let package_info = graph.get(&package_name).unwrap();
+                let version = *package_info.get_version();
 
-            // パッケージのインストール時間を取得
-            let version = graph.get(&package_name).unwrap().get_version();
-            let install_time_ms = registry
-                .packages
-                .get(&package_name)
-                .and_then(|entry| entry.get_package_info(version))
-                .map(|info| info.get_install_time_ms())
-                .unwrap_or(0);
+                // キャッシュチェック
+                let is_cached = {
+                    let cache = installed_cache.lock().unwrap();
+                    cache.contains(&(package_name.clone(), version))
+                };
 
-            let tx_clone = tx.clone();
-            let package_name_clone = package_name.clone();
+                if is_cached {
+                    ready_queue.pop_front();
+                    info!(
+                        "[{}]\t[キャッシュ] {}",
+                        chrono::Local::now().format(TIME_FORMAT),
+                        package_name
+                    );
+                    installed_count += 1;
 
-            active_workers += 1;
+                    // 依存関係の更新（キャッシュヒット時も依存先を解放する）
+                    if let Some(dependents) = adjacency_list.get(&package_name) {
+                        let mut degree_lock = in_degree.lock().unwrap();
+                        for dep in dependents {
+                            let count = degree_lock.get_mut(dep).unwrap();
+                            *count -= 1;
+                            if *count == 0 {
+                                ready_queue.push_back(dep.clone());
+                            }
+                        }
+                    }
+                } else if active_workers < worker_count {
+                    ready_queue.pop_front();
+                    let tx_clone = tx.clone();
+                    let package_name_clone = package_name.clone();
+                    let installed_cache_clone = installed_cache.clone();
 
-            thread::spawn(move || {
-                info!(
-                    "[{}]\t[開始] {}",
-                    chrono::Local::now().format(TIME_FORMAT),
-                    package_name_clone
-                );
-                thread::sleep(Duration::from_millis(install_time_ms)); // インストール中...
-                tx_clone.send(package_name_clone).unwrap();
-            });
-        }
+                    info!(
+                        "[{}]\t[開始] {} ver{}",
+                        chrono::Local::now().format(TIME_FORMAT),
+                        package_name_clone,
+                        version
+                    );
 
-        if active_workers == 0 && ready_queue.is_empty() {
-            break; // すべて完了
-        }
+                    let install_time_ms = registry
+                        .get_package_info(&package_name, &version)
+                        .map(|info| info.get_install_time_ms())
+                        .unwrap_or(0);
 
-        // B. いずれかのスレッドが終わるのを待つ
-        let finished_package = rx.recv().unwrap();
-        active_workers -= 1;
-        installed_count += 1;
-        info!(
-            "[{}]\t  [完了] {} (進捗: {}/{})",
-            chrono::Local::now().format(TIME_FORMAT),
-            finished_package,
-            installed_count,
-            all_packages.len()
-        );
+                    active_workers += 1;
 
-        // C. 終わったパッケージに依存していたもののロックを解除
-        if let Some(dependents) = adjacency_list.get(&finished_package) {
-            let mut degree_lock = in_degree.lock().unwrap();
-            for dep in dependents {
-                let count = degree_lock.get_mut(dep).unwrap();
-                // トポロジカルソートのために減らす
-                *count -= 1;
-                // 依存がない、つまり依存先を待たずにインストールに進むことができるものが見つかったことになるので、次の太陽の
-                if *count == 0 {
-                    ready_queue.push_back(dep.clone());
+                    s.spawn(move || {
+                        info!(
+                            "[{}]\t[インストール中] {}",
+                            chrono::Local::now().format(TIME_FORMAT),
+                            package_name_clone
+                        );
+                        let package_info = graph.get(&package_name_clone).unwrap();
+                        for dep_package in package_info.get_dependencies() {
+                            let dep_package_version =
+                                *graph.get(dep_package).unwrap().get_version();
+
+                            // 依存先の具体的な処理
+
+                            let is_cached = {
+                                let cache = installed_cache_clone.lock().unwrap();
+                                cache.contains(&(dep_package.clone(), dep_package_version))
+                            };
+
+                            info!(
+                                "[{}]\t[依存先処理開始] {} ver{} for {}",
+                                chrono::Local::now().format(TIME_FORMAT),
+                                dep_package,
+                                dep_package_version,
+                                package_name
+                            );
+                            if is_cached {
+                                info!(
+                                    "[{}]\t[依存先キャッシュ] {} for {}",
+                                    chrono::Local::now().format(TIME_FORMAT),
+                                    dep_package,
+                                    package_name
+                                );
+                            } else {
+                                info!(
+                                    "[{}]\t[依存先追加インストール中] {} for {}",
+                                    chrono::Local::now().format(TIME_FORMAT),
+                                    dep_package,
+                                    package_name
+                                );
+                                let dep_package_install_time_ms = registry
+                                    .get_package_info(dep_package, &dep_package_version)
+                                    .map(|info| info.get_install_time_ms())
+                                    .unwrap_or(0);
+
+                                thread::sleep(Duration::from_millis(dep_package_install_time_ms)); // インストール中...
+                                info!(
+                                    "[{}]\t[依存先追加インストール完了] {} for {} used {}ms",
+                                    chrono::Local::now().format(TIME_FORMAT),
+                                    dep_package,
+                                    package_name,
+                                    dep_package_install_time_ms
+                                );
+                            }
+                        }
+
+                        thread::sleep(Duration::from_millis(install_time_ms)); // インストール中...
+
+                        info!(
+                            "[{}]\t[インストール完了] {} used {}ms",
+                            chrono::Local::now().format(TIME_FORMAT),
+                            package_name_clone,
+                            install_time_ms
+                        );
+                        // キャッシュに追加
+                        let mut cache = installed_cache_clone.lock().unwrap();
+                        cache.insert((package_name_clone.clone(), version));
+                        tx_clone.send(package_name_clone).unwrap();
+                    });
+                } else {
+                    break;
+                }
+            }
+
+            if active_workers == 0 && ready_queue.is_empty() {
+                break; // すべて完了
+            }
+
+            // B. いずれかのスレッドが終わるのを待つ
+            let finished_package = rx.recv().unwrap();
+            active_workers -= 1;
+            installed_count += 1;
+            info!(
+                "[{}]\t[完了] {} (進捗: {}/{})",
+                chrono::Local::now().format(TIME_FORMAT),
+                finished_package,
+                installed_count,
+                all_packages.len()
+            );
+
+            // C. 終わったパッケージに依存していたもののロックを解除
+            if let Some(dependents) = adjacency_list.get(&finished_package) {
+                let mut degree_lock = in_degree.lock().unwrap();
+                for dep in dependents {
+                    let count = degree_lock.get_mut(dep).unwrap();
+                    // トポロジカルソートのために減らす
+                    *count -= 1;
+                    // 依存がない、つまり依存先を待たずにインストールに進むことができるものが見つかったことになる
+                    if *count == 0 {
+                        ready_queue.push_back(dep.clone());
+                    }
                 }
             }
         }
+    });
+
+    let not_finished: HashMap<PackageName, i32> =
+        <HashMap<String, i32> as Clone>::clone(&in_degree.lock().unwrap())
+            .into_iter()
+            .filter(|(_, v)| *v != 0)
+            .collect();
+    if !not_finished.is_empty() {
+        panic!("Not finished in {:?} packages", not_finished);
     }
 
     info!("--- すべてのインストールが正常に完了しました ---");
+
+    info!(
+        "cached:\n  {}",
+        installed_cache
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(p, v)| format!("\"{}\" => \"{}\"", p, v))
+            .collect::<Vec<String>>()
+            .join("\n  ")
+    );
 }
 
 #[cfg(test)]
