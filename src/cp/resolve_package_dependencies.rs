@@ -1545,4 +1545,72 @@ mod tests {
         let err = result.err().unwrap();
         assert!(err.contains("Cycle detected"));
     }
+
+    #[test]
+    fn test_simulate_parallel_install() {
+        // A -> B (^1.0.0), C (^1.0.0)
+        // B -> D (^1.0.0)
+        // C -> D (^1.1.0)
+        // D (1.0.0, 1.1.0, 1.2.0)
+        // Expected: A, B, C, D(1.2.0 or 1.1.0)
+        // D 1.0.0 is invalid because of C's constraint.
+
+        let mut registry = PackageRegistry::new();
+        let v100 = Version::new(1, 0, 0);
+        let v110 = Version::new(1, 1, 0);
+        let v120 = Version::new(1, 2, 0);
+
+        // D
+        registry.add_package("D", v100, PackageInfo::new(vec![], 100));
+        registry.add_package("D", v110, PackageInfo::new(vec![], 100));
+        registry.add_package("D", v120, PackageInfo::new(vec![], 100));
+
+        // B -> D ^1.0.0
+        registry.add_package(
+            "B",
+            v100,
+            PackageInfo::new(vec![("D".to_string(), "^1.0.0".parse().unwrap())], 200),
+        );
+
+        // C -> D ^1.1.0
+        registry.add_package(
+            "C",
+            v100,
+            PackageInfo::new(vec![("D".to_string(), "^1.1.0".parse().unwrap())], 300),
+        );
+
+        // A -> B, C
+        registry.add_package(
+            "A",
+            v100,
+            PackageInfo::new(
+                vec![
+                    ("B".to_string(), "^1.0.0".parse().unwrap()),
+                    ("C".to_string(), "^1.0.0".parse().unwrap()),
+                ],
+                400,
+            ),
+        );
+
+        let root_package_name = "ROOT";
+        let root_version: Version = "0.1.0".parse().unwrap();
+        let root_deps: Vec<(PackageName, Constraint)> =
+            vec![("A".to_string(), "^1.0.0".parse().unwrap())];
+
+        // 依存関係解決
+        let result =
+            resolve_deps_by_recursive_backtracking(&registry, "ROOT", root_version, &root_deps);
+
+        assert!(result.is_ok());
+        let graph = result.unwrap();
+        println!("{:#?}", graph);
+
+        // シミュレーション実行 (パニックしないことを確認)
+        // ログ出力を確認したい場合は `cargo test -- --nocapture` を使用
+        println!("--- Simulating with 2 workers ---");
+        simulate_parallel_install(&registry, &graph, 2);
+
+        println!("--- Simulating with 1 worker ---");
+        simulate_parallel_install(&registry, &graph, 1);
+    }
 }
